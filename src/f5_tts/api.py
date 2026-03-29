@@ -31,6 +31,7 @@ class F5TTS:
         vocoder_local_path=None,
         device=None,
         hf_cache_dir=None,
+        lora_path=None,
     ):
         model_cfg = OmegaConf.load(str(files("f5_tts").joinpath(f"configs/{model}.yaml")))
         model_cls = get_class(f"f5_tts.model.{model_cfg.model.backbone}")
@@ -80,7 +81,8 @@ class F5TTS:
                 cached_path(f"hf://SWivid/{repo_name}/{model}/model_{ckpt_step}.{ckpt_type}", cache_dir=hf_cache_dir)
             )
         self.ema_model = load_model(
-            model_cls, model_arc, ckpt_file, self.mel_spec_type, vocab_file, self.ode_method, self.use_ema, self.device
+            model_cls, model_arc, ckpt_file, self.mel_spec_type, vocab_file, self.ode_method, self.use_ema, self.device,
+            lora_path=lora_path,
         )
 
     def transcribe(self, ref_audio, language=None):

@@ -244,6 +244,7 @@ def load_model(
     ode_method=ode_method,
     use_ema=True,
     device=device,
+    lora_path=None,
 ):
     if vocab_file == "":
         vocab_file = str(files("f5_tts").joinpath("infer/examples/vocab.txt"))
@@ -272,6 +273,14 @@ def load_model(
 
     dtype = torch.float32 if mel_spec_type == "bigvgan" else None
     model = load_checkpoint(model, ckpt_path, device, dtype=dtype, use_ema=use_ema)
+
+    if lora_path is not None:
+        from peft import PeftModel
+
+        print(f"\nLoading LoRA adapter from {lora_path}")
+        model = PeftModel.from_pretrained(model, lora_path)
+        model = model.merge_and_unload()
+        print("LoRA adapter merged into base model\n")
 
     return model
 

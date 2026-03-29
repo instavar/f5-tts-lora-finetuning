@@ -53,6 +53,7 @@ class Trainer:
         is_local_vocoder: bool = False,  # use local path vocoder
         local_vocoder_path: str = "",  # local vocoder path
         model_cfg_dict: dict = dict(),  # training config
+        use_lora: bool = False,  # LoRA fine-tuning mode (disables EMA, saves only adapter weights)
     ):
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
 
@@ -102,10 +103,15 @@ class Trainer:
                 self.writer = SummaryWriter(log_dir=f"runs/{wandb_run_name}")
 
         self.model = model
+        self.use_lora = use_lora
 
         if self.is_main:
-            self.ema_model = EMA(model, include_online_model=False, **ema_kwargs)
-            self.ema_model.to(self.accelerator.device)
+            if self.use_lora:
+                self.ema_model = None
+                print("LoRA mode: EMA disabled, only adapter weights will be saved")
+            else:
+                self.ema_model = EMA(model, include_online_model=False, **ema_kwargs)
+                self.ema_model.to(self.accelerator.device)
 
             print(f"Using logger: {logger}")
             if grad_accumulation_steps > 1:
@@ -135,12 +141,13 @@ class Trainer:
 
         self.duration_predictor = duration_predictor
 
+        trainable_params = [p for p in model.parameters() if p.requires_grad]
         if bnb_optimizer:
             import bitsandbytes as bnb
 
-            self.optimizer = bnb.optim.AdamW8bit(model.parameters(), lr=learning_rate)
+            self.optimizer = bnb.optim.AdamW8bit(trainable_params, lr=learning_rate)
         else:
-            self.optimizer = AdamW(model.parameters(), lr=learning_rate, fused=True)
+            self.optimizer = AdamW(trainable_params, lr=learning_rate, fused=True)
         self.model, self.optimizer = self.accelerator.prepare(self.model, self.optimizer)
 
     @property
@@ -150,58 +157,135 @@ class Trainer:
     def save_checkpoint(self, update, last=False):
         self.accelerator.wait_for_everyone()
         if self.is_main:
-            checkpoint = dict(
-                model_state_dict=self.accelerator.unwrap_model(self.model).state_dict(),
-                optimizer_state_dict=self.optimizer.state_dict(),
-                ema_model_state_dict=self.ema_model.state_dict(),
-                scheduler_state_dict=self.scheduler.state_dict(),
-                update=update,
-            )
             if not os.path.exists(self.checkpoint_path):
                 os.makedirs(self.checkpoint_path)
-            if last:
-                self.accelerator.save(checkpoint, f"{self.checkpoint_path}/model_last.pt")
-                print(f"Saved last checkpoint at update {update}")
+
+            if self.use_lora:
+                # LoRA mode: save only adapter weights via PEFT (tiny files)
+                unwrapped = self.accelerator.unwrap_model(self.model)
+                lora_dir = f"{self.checkpoint_path}/lora_last" if last else f"{self.checkpoint_path}/lora_{update}"
+                unwrapped.save_pretrained(lora_dir)
+                # Also save optimizer + scheduler for resumption
+                torch.save(
+                    dict(
+                        optimizer_state_dict=self.optimizer.state_dict(),
+                        scheduler_state_dict=self.scheduler.state_dict(),
+                        update=update,
+                    ),
+                    os.path.join(lora_dir, "training_state.pt"),
+                )
+                if last:
+                    print(f"Saved LoRA adapter at update {update} -> {lora_dir}")
+                else:
+                    if self.keep_last_n_checkpoints > 0:
+                        import shutil
+
+                        lora_dirs = sorted(
+                            [
+                                d
+                                for d in os.listdir(self.checkpoint_path)
+                                if d.startswith("lora_") and d != "lora_last" and os.path.isdir(os.path.join(self.checkpoint_path, d))
+                            ],
+                            key=lambda x: int(x.split("_")[1]),
+                        )
+                        while len(lora_dirs) > self.keep_last_n_checkpoints:
+                            oldest = lora_dirs.pop(0)
+                            shutil.rmtree(os.path.join(self.checkpoint_path, oldest))
+                            print(f"Removed old LoRA checkpoint: {oldest}")
             else:
-                if self.keep_last_n_checkpoints == 0:
-                    return
-                self.accelerator.save(checkpoint, f"{self.checkpoint_path}/model_{update}.pt")
-                if self.keep_last_n_checkpoints > 0:
-                    # Updated logic to exclude pretrained model from rotation
-                    checkpoints = [
-                        f
-                        for f in os.listdir(self.checkpoint_path)
-                        if f.startswith("model_")
-                        and not f.startswith("pretrained_")  # Exclude pretrained models
-                        and f.endswith(".pt")
-                        and f != "model_last.pt"
-                    ]
-                    checkpoints.sort(key=lambda x: int(x.split("_")[1].split(".")[0]))
-                    while len(checkpoints) > self.keep_last_n_checkpoints:
-                        oldest_checkpoint = checkpoints.pop(0)
-                        os.remove(os.path.join(self.checkpoint_path, oldest_checkpoint))
-                        print(f"Removed old checkpoint: {oldest_checkpoint}")
+                checkpoint = dict(
+                    model_state_dict=self.accelerator.unwrap_model(self.model).state_dict(),
+                    optimizer_state_dict=self.optimizer.state_dict(),
+                    ema_model_state_dict=self.ema_model.state_dict(),
+                    scheduler_state_dict=self.scheduler.state_dict(),
+                    update=update,
+                )
+                if last:
+                    self.accelerator.save(checkpoint, f"{self.checkpoint_path}/model_last.pt")
+                    print(f"Saved last checkpoint at update {update}")
+                else:
+                    if self.keep_last_n_checkpoints == 0:
+                        return
+                    self.accelerator.save(checkpoint, f"{self.checkpoint_path}/model_{update}.pt")
+                    if self.keep_last_n_checkpoints > 0:
+                        checkpoints = [
+                            f
+                            for f in os.listdir(self.checkpoint_path)
+                            if f.startswith("model_")
+                            and not f.startswith("pretrained_")
+                            and f.endswith(".pt")
+                            and f != "model_last.pt"
+                        ]
+                        checkpoints.sort(key=lambda x: int(x.split("_")[1].split(".")[0]))
+                        while len(checkpoints) > self.keep_last_n_checkpoints:
+                            oldest_checkpoint = checkpoints.pop(0)
+                            os.remove(os.path.join(self.checkpoint_path, oldest_checkpoint))
+                            print(f"Removed old checkpoint: {oldest_checkpoint}")
 
     def load_checkpoint(self):
-        if (
-            not exists(self.checkpoint_path)
-            or not os.path.exists(self.checkpoint_path)
-            or not any(filename.endswith((".pt", ".safetensors")) for filename in os.listdir(self.checkpoint_path))
-        ):
+        if not exists(self.checkpoint_path) or not os.path.exists(self.checkpoint_path):
+            return 0
+
+        dir_contents = os.listdir(self.checkpoint_path)
+
+        # LoRA mode: look for lora_last or lora_N directories
+        if self.use_lora:
+            lora_dirs = sorted(
+                [d for d in dir_contents if d.startswith("lora_") and os.path.isdir(os.path.join(self.checkpoint_path, d))],
+                key=lambda x: 0 if x == "lora_last" else int(x.split("_")[1]),
+            )
+            if not lora_dirs:
+                # No LoRA checkpoint yet — base weights already loaded via pretrained checkpoint copy
+                # (the pretrained_ file is loaded into the base model before PEFT wrapping in finetune_cli.py)
+                return 0
+
+            # Prefer lora_last, else latest numbered
+            if "lora_last" in lora_dirs:
+                lora_dir = os.path.join(self.checkpoint_path, "lora_last")
+            else:
+                lora_dir = os.path.join(self.checkpoint_path, lora_dirs[-1])
+
+            self.accelerator.wait_for_everyone()
+
+            # Load LoRA adapter weights
+            from peft import set_peft_model_state_dict
+            from safetensors.torch import load_file
+
+            adapter_path = os.path.join(lora_dir, "adapter_model.safetensors")
+            if os.path.exists(adapter_path):
+                adapter_state = load_file(adapter_path, device="cpu")
+                set_peft_model_state_dict(self.accelerator.unwrap_model(self.model), adapter_state)
+                print(f"Loaded LoRA adapter from {lora_dir}")
+
+            # Load optimizer/scheduler state for resumption
+            training_state_path = os.path.join(lora_dir, "training_state.pt")
+            if os.path.exists(training_state_path):
+                training_state = torch.load(training_state_path, weights_only=True, map_location="cpu")
+                self.optimizer.load_state_dict(training_state["optimizer_state_dict"])
+                if self.scheduler:
+                    self.scheduler.load_state_dict(training_state["scheduler_state_dict"])
+                update = training_state["update"]
+                del training_state
+            else:
+                update = 0
+
+            gc.collect()
+            return update
+
+        # Standard (non-LoRA) checkpoint loading
+        if not any(filename.endswith((".pt", ".safetensors")) for filename in dir_contents):
             return 0
 
         self.accelerator.wait_for_everyone()
-        if "model_last.pt" in os.listdir(self.checkpoint_path):
+        if "model_last.pt" in dir_contents:
             latest_checkpoint = "model_last.pt"
         else:
-            # Updated to consider pretrained models for loading but prioritize training checkpoints
             all_checkpoints = [
                 f
-                for f in os.listdir(self.checkpoint_path)
+                for f in dir_contents
                 if (f.startswith("model_") or f.startswith("pretrained_")) and f.endswith((".pt", ".safetensors"))
             ]
 
-            # First try to find regular training checkpoints
             training_checkpoints = [f for f in all_checkpoints if f.startswith("model_") and f != "model_last.pt"]
             if training_checkpoints:
                 latest_checkpoint = sorted(
@@ -209,16 +293,14 @@ class Trainer:
                     key=lambda x: int("".join(filter(str.isdigit, x))),
                 )[-1]
             else:
-                # If no training checkpoints, use pretrained model
                 latest_checkpoint = next(f for f in all_checkpoints if f.startswith("pretrained_"))
 
-        if latest_checkpoint.endswith(".safetensors"):  # always a pretrained checkpoint
+        if latest_checkpoint.endswith(".safetensors"):
             from safetensors.torch import load_file
 
             checkpoint = load_file(f"{self.checkpoint_path}/{latest_checkpoint}", device="cpu")
             checkpoint = {"ema_model_state_dict": checkpoint}
         elif latest_checkpoint.endswith(".pt"):
-            # checkpoint = torch.load(f"{self.checkpoint_path}/{latest_checkpoint}", map_location=self.accelerator.device)  # rather use accelerator.load_state ಥ_ಥ
             checkpoint = torch.load(
                 f"{self.checkpoint_path}/{latest_checkpoint}", weights_only=True, map_location="cpu"
             )
@@ -228,18 +310,16 @@ class Trainer:
             if key in checkpoint["ema_model_state_dict"]:
                 del checkpoint["ema_model_state_dict"][key]
 
-        if self.is_main:
+        if self.is_main and self.ema_model is not None:
             self.ema_model.load_state_dict(checkpoint["ema_model_state_dict"])
 
         if "update" in checkpoint or "step" in checkpoint:
-            # patch for backward compatibility, with before f992c4e
             if "step" in checkpoint:
                 checkpoint["update"] = checkpoint["step"] // self.grad_accumulation_steps
                 if self.grad_accumulation_steps > 1 and self.is_main:
                     print(
                         "F5-TTS WARNING: Loading checkpoint saved with per_steps logic (before f992c4e), will convert to per_updates according to grad_accumulation_steps setting, may have unexpected behaviour."
                     )
-            # patch for backward compatibility, 305e3ea
             for key in ["mel_spec.mel_stft.mel_scale.fb", "mel_spec.mel_stft.spectrogram.window"]:
                 if key in checkpoint["model_state_dict"]:
                     del checkpoint["model_state_dict"][key]
@@ -384,7 +464,7 @@ class Trainer:
                     self.optimizer.zero_grad()
 
                 if self.accelerator.sync_gradients:
-                    if self.is_main:
+                    if self.is_main and self.ema_model is not None:
                         self.ema_model.update()
 
                     global_update += 1

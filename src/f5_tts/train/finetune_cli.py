@@ -72,6 +72,19 @@ def parse_args():
         help="Use 8-bit Adam optimizer from bitsandbytes",
     )
 
+    # LoRA arguments
+    parser.add_argument("--lora", action="store_true", help="Enable LoRA fine-tuning instead of full parameter training")
+    parser.add_argument("--lora_rank", type=int, default=16, help="LoRA rank (r)")
+    parser.add_argument("--lora_alpha", type=int, default=16, help="LoRA alpha (scaling = alpha/rank)")
+    parser.add_argument("--lora_dropout", type=float, default=0.0, help="LoRA dropout rate")
+    parser.add_argument(
+        "--lora_target_modules",
+        type=str,
+        nargs="+",
+        default=["to_q", "to_k", "to_v", "to_out.0"],
+        help="Target module names for LoRA injection (default: attention Q/K/V/O projections)",
+    )
+
     return parser.parse_args()
 
 
@@ -180,6 +193,32 @@ def main():
         vocab_char_map=vocab_char_map,
     )
 
+    # Apply LoRA if requested
+    if args.lora:
+        from peft import LoraConfig, get_peft_model
+
+        # Load pretrained base weights BEFORE applying LoRA
+        # (Trainer.load_checkpoint handles this for non-LoRA, but PeftModel wrapping changes state_dict keys)
+        if args.finetune:
+            from f5_tts.infer.utils_infer import load_checkpoint as load_ckpt_infer
+
+            print(f"Loading pretrained base weights from {ckpt_path}")
+            model = load_ckpt_infer(model, ckpt_path, device="cpu", dtype=None, use_ema=True)
+
+        # Freeze all base parameters
+        for param in model.parameters():
+            param.requires_grad = False
+
+        lora_config = LoraConfig(
+            r=args.lora_rank,
+            lora_alpha=args.lora_alpha,
+            lora_dropout=args.lora_dropout,
+            target_modules=args.lora_target_modules,
+            bias="none",
+        )
+        model = get_peft_model(model, lora_config)
+        model.print_trainable_parameters()
+
     trainer = Trainer(
         model,
         args.epochs,
@@ -200,6 +239,7 @@ def main():
         log_samples=args.log_samples,
         last_per_updates=args.last_per_updates,
         bnb_optimizer=args.bnb_optimizer,
+        use_lora=args.lora,
     )
 
     train_dataset = load_dataset(args.dataset_name, tokenizer, mel_spec_kwargs=mel_spec_kwargs)

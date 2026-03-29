@@ -174,6 +174,12 @@ parser.add_argument(
     type=str,
     help="Specify the device to run on",
 )
+parser.add_argument(
+    "--lora_path",
+    type=str,
+    default=None,
+    help="Path to LoRA adapter directory (merges into base model at load time)",
+)
 args = parser.parse_args()
 
 
@@ -295,9 +301,12 @@ elif ckpt_file.startswith("hf://"):
 if vocab_file.startswith("hf://"):
     vocab_file = str(cached_path(vocab_file))
 
+lora_path = args.lora_path or config.get("lora_path", None)
+
 print(f"Using {model}...")
 ema_model = load_model(
-    model_cls, model_arc, ckpt_file, mel_spec_type=vocoder_name, vocab_file=vocab_file, device=device
+    model_cls, model_arc, ckpt_file, mel_spec_type=vocoder_name, vocab_file=vocab_file, device=device,
+    lora_path=lora_path,
 )
 
 
