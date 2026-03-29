@@ -254,6 +254,81 @@ Note: Some model components have linting exceptions for E722 to accommodate tens
 - [F5-TTS-ONNX](https://github.com/DakeQQ/F5-TTS-ONNX) ONNX Runtime version by [DakeQQ](https://github.com/DakeQQ)
 - [Yuekai Zhang](https://github.com/yuekaizhang) Triton and TensorRT-LLM support ~
 
+## LoRA Fine-tuning (instavar fork)
+
+This fork adds **LoRA (Low-Rank Adaptation)** support to F5-TTS via [PEFT](https://github.com/huggingface/peft). LoRA freezes the base model and trains small adapter matrices (~0.9% of parameters at rank 16), reducing VRAM usage and producing tiny checkpoint files (~6 MB vs ~2.7 GB for full fine-tuning).
+
+### Quick Start
+
+```bash
+# LoRA fine-tuning (single speaker adaptation)
+accelerate launch src/f5_tts/train/finetune_cli.py \
+  --exp_name F5TTS_v1_Base \
+  --dataset_name my_speaker \
+  --finetune \
+  --lora \
+  --lora_rank 16 \
+  --lora_alpha 16 \
+  --learning_rate 1e-4 \
+  --epochs 20 \
+  --num_warmup_updates 200 \
+  --save_per_updates 500 \
+  --last_per_updates 100 \
+  --batch_size_per_gpu 3200 \
+  --batch_size_type frame
+```
+
+### LoRA CLI Arguments
+
+| Argument | Default | Description |
+|---|---|---|
+| `--lora` | `False` | Enable LoRA fine-tuning mode |
+| `--lora_rank` | `16` | LoRA rank (r). Higher = more capacity, more params |
+| `--lora_alpha` | `16` | LoRA alpha. Scaling factor = alpha/rank |
+| `--lora_dropout` | `0.0` | Dropout on LoRA layers (0.0 recommended for small datasets) |
+| `--lora_target_modules` | `to_q to_k to_v to_out.0` | Which layers to apply LoRA to |
+
+### Target Modules
+
+The default targets the attention Q/K/V/O projections in the DiT transformer blocks. You can also include the feedforward layers:
+
+```bash
+# Attention + FFN (broader adaptation, ~1.7% of params at r=16)
+--lora_target_modules to_q to_k to_v to_out.0 ff.ff.0.0 ff.ff.2
+```
+
+### Inference with LoRA
+
+LoRA adapters are merged into the base model at load time (zero inference overhead):
+
+```bash
+# CLI inference
+f5-tts_infer-cli \
+  --lora_path ckpts/my_speaker/lora_last \
+  -r ref_audio.wav \
+  -s "Reference text." \
+  -t "Text to synthesize."
+
+# Python API
+from f5_tts.api import F5TTS
+tts = F5TTS(lora_path="ckpts/my_speaker/lora_last")
+wav, sr, spec = tts.infer(ref_file="ref.wav", ref_text="...", gen_text="...")
+```
+
+### LoRA Config also works in TOML config files
+
+```toml
+# basic.toml
+lora_path = "ckpts/my_speaker/lora_last"
+```
+
+### Key Design Decisions
+
+- **No EMA in LoRA mode**: The base model already has well-trained EMA weights from pre-training. LoRA adds a small delta. This matches community practice for diffusion LoRA (Kohya, diffusers).
+- **Separate adapter checkpoints**: LoRA saves `adapter_config.json` + `adapter_model.safetensors` (~6 MB) instead of full model checkpoints (~2.7 GB).
+- **Merge at inference**: `merge_and_unload()` bakes LoRA weights into the base model, producing a standard `nn.Module` with zero inference overhead.
+- **Resumable training**: Optimizer and scheduler states are saved alongside LoRA adapters for training resumption.
+
 ## Citation
 If our work and codebase is useful for you, please cite as:
 ```
