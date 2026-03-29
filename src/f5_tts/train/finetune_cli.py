@@ -73,7 +73,9 @@ def parse_args():
     )
 
     # LoRA arguments
-    parser.add_argument("--lora", action="store_true", help="Enable LoRA fine-tuning instead of full parameter training")
+    parser.add_argument(
+        "--lora", action="store_true", help="Enable LoRA fine-tuning instead of full parameter training"
+    )
     parser.add_argument("--lora_rank", type=int, default=16, help="LoRA rank (r)")
     parser.add_argument("--lora_alpha", type=int, default=16, help="LoRA alpha (scaling = alpha/rank)")
     parser.add_argument("--lora_dropout", type=float, default=0.0, help="LoRA dropout rate")

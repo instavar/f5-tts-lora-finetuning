@@ -184,7 +184,9 @@ class Trainer:
                             [
                                 d
                                 for d in os.listdir(self.checkpoint_path)
-                                if d.startswith("lora_") and d != "lora_last" and os.path.isdir(os.path.join(self.checkpoint_path, d))
+                                if d.startswith("lora_")
+                                and d != "lora_last"
+                                and os.path.isdir(os.path.join(self.checkpoint_path, d))
                             ],
                             key=lambda x: int(x.split("_")[1]),
                         )
@@ -231,7 +233,11 @@ class Trainer:
         # LoRA mode: look for lora_last or lora_N directories
         if self.use_lora:
             lora_dirs = sorted(
-                [d for d in dir_contents if d.startswith("lora_") and os.path.isdir(os.path.join(self.checkpoint_path, d))],
+                [
+                    d
+                    for d in dir_contents
+                    if d.startswith("lora_") and os.path.isdir(os.path.join(self.checkpoint_path, d))
+                ],
                 key=lambda x: 0 if x == "lora_last" else int(x.split("_")[1]),
             )
             if not lora_dirs:

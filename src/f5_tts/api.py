@@ -81,7 +81,14 @@ class F5TTS:
                 cached_path(f"hf://SWivid/{repo_name}/{model}/model_{ckpt_step}.{ckpt_type}", cache_dir=hf_cache_dir)
             )
         self.ema_model = load_model(
-            model_cls, model_arc, ckpt_file, self.mel_spec_type, vocab_file, self.ode_method, self.use_ema, self.device,
+            model_cls,
+            model_arc,
+            ckpt_file,
+            self.mel_spec_type,
+            vocab_file,
+            self.ode_method,
+            self.use_ema,
+            self.device,
             lora_path=lora_path,
         )
 
