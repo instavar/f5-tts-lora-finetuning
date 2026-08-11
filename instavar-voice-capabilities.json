@@ -1,0 +1,128 @@
+{
+  "schema_version": "1.0.0",
+  "repository": {
+    "slug": "instavar/f5-tts-lora-finetuning",
+    "url": "https://github.com/instavar/f5-tts-lora-finetuning",
+    "evidence_revision": "25f6d02438809ffab8441a9b36d34f00770f3dd2"
+  },
+  "model": {
+    "family": "F5-TTS",
+    "upstream_repository": "SWivid/F5-TTS"
+  },
+  "adaptation": {
+    "lora": {
+      "status": "supported",
+      "evidence": [
+        {
+          "level": "validated",
+          "ref": "README.md#lora-fine-tuning-instavar-fork",
+          "claim": "The fork adds PEFT LoRA training, adapter-only checkpoints, resume state, merge, and inference."
+        }
+      ]
+    },
+    "full_sft": {
+      "status": "upstream_only",
+      "evidence": [
+        {
+          "level": "repository_declared",
+          "ref": "src/f5_tts/train/README.md",
+          "claim": "The inherited upstream trainer remains available separately from the Instavar LoRA path."
+        }
+      ]
+    }
+  },
+  "runtimes": [
+    {
+      "id": "pytorch",
+      "status": "supported",
+      "artifact_mode": "adapter",
+      "streaming": false,
+      "evidence": [
+        {
+          "level": "validated",
+          "ref": "README.md#inference-with-lora",
+          "claim": "The Python CLI and API load and merge LoRA adapters for inference."
+        }
+      ]
+    },
+    {
+      "id": "triton_tensorrt_llm",
+      "status": "unverified_for_adapter",
+      "artifact_mode": "merged",
+      "streaming": true,
+      "evidence": [
+        {
+          "level": "repository_declared",
+          "ref": "src/f5_tts/runtime/triton_trtllm/README.md",
+          "claim": "The inherited runtime exists, but this manifest does not establish LoRA-merged equivalence."
+        }
+      ]
+    },
+    {
+      "id": "mlx",
+      "status": "unverified_for_adapter",
+      "artifact_mode": "adapter",
+      "streaming": false,
+      "evidence": [
+        {
+          "level": "repository_declared",
+          "ref": "README.md#acknowledgements",
+          "claim": "The README links a community MLX implementation; adapter compatibility is not reproduced here."
+        }
+      ]
+    },
+    {
+      "id": "onnx",
+      "status": "unverified_for_adapter",
+      "artifact_mode": "merged",
+      "streaming": false,
+      "evidence": [
+        {
+          "level": "repository_declared",
+          "ref": "README.md#acknowledgements",
+          "claim": "The README links a community ONNX implementation; adapter compatibility is not reproduced here."
+        }
+      ]
+    }
+  ],
+  "evaluation": {
+    "prompt_pack": {
+      "id": "instavar-singapore-english",
+      "version": "1.0.0",
+      "sha256": "79491bec271c0aa1ea1b7dd92dd976476959f1607859a67451652f7c12e56a45"
+    },
+    "objective_metrics": [
+      "asr_word_error_rate",
+      "speaker_embedding_similarity",
+      "invalid_output_rate",
+      "duration_seconds",
+      "sample_rate_hz",
+      "silence_fraction",
+      "clipping_fraction",
+      "real_time_factor",
+      "peak_memory_bytes"
+    ],
+    "listening_criteria": [
+      "speaker_identity",
+      "singapore_english_accent_fidelity",
+      "lexical_pronunciation",
+      "cadence_variation",
+      "long_form_monotony",
+      "naturalness",
+      "emotion_and_instruction_obedience",
+      "artifact_severity",
+      "listening_fatigue"
+    ]
+  },
+  "rights": {
+    "code": "The repository code is MIT. The README states that the referenced pretrained models use CC-BY-NC terms.",
+    "weights": "Pin and review the upstream model-weight terms separately from this repository's code license.",
+    "dataset": "Record dataset provenance, permitted use, and speaker consent before training.",
+    "generated_output": "Review the model and dataset terms for the intended generated-output use."
+  },
+  "known_gaps": [
+    "Separate inherited upstream runtime breadth from Instavar's LoRA-specific contribution in release notes.",
+    "Reproduce adapter-merged equivalence in Triton, MLX, or ONNX before promoting those runtimes.",
+    "Run the frozen Singapore English blind listening suite against the base model and selected adapter."
+  ]
+}
