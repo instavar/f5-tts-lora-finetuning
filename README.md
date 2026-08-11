@@ -261,8 +261,14 @@ This fork adds **LoRA (Low-Rank Adaptation)** support to F5-TTS via [PEFT](https
 ### Quick Start
 
 ```bash
-# LoRA fine-tuning (single speaker adaptation)
-accelerate launch src/f5_tts/train/finetune_cli.py \
+# Audit JSONL manifests for the same corpus and split assignment, then train.
+export INSTAVAR_VOICE_EVAL_DIR=/path/to/instavar-voice-evaluation
+scripts/run_with_corpus_audit.sh \
+  --split train=data/audit/train.jsonl \
+  --split validation=data/audit/validation.jsonl \
+  --split test=data/audit/test.jsonl \
+  --group-field recording_id \
+  -- accelerate launch src/f5_tts/train/finetune_cli.py \
   --exp_name F5TTS_v1_Base \
   --dataset_name my_speaker \
   --finetune \

@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0.0",
+  "run_id": "f5tts-v1-female01-lora-1250",
+  "repository": "instavar/f5-tts-lora-finetuning",
+  "model_family": "F5-TTS",
+  "adaptation_mode": "lora",
+  "evidence_revision": "25f6d02438809ffab8441a9b36d34f00770f3dd2",
+  "observed_date": "2026-03-30",
+  "source_refs": [
+    "TRAINING_LOG.md#run-2-f5tts_v1_base--female_01-production",
+    "README.md#lora-fine-tuning-instavar-fork",
+    "reports/runtime-smoke-2026-08-12.md"
+  ],
+  "stage_evidence": {
+    "preflight": {
+      "status": "observed",
+      "evidence_refs": ["TRAINING_LOG.md#run-1-f5tts_base-v0--female_01-smoke-test"],
+      "boundary": "A smoke run checked LoRA plumbing, but no grouped split audit artifact was preserved."
+    },
+    "training": {
+      "status": "validated",
+      "evidence_refs": ["TRAINING_LOG.md#exact-training-command"],
+      "boundary": "A real 1,250-step LoRA run completed and preserved resumable adapter checkpoints."
+    },
+    "inference": {
+      "status": "validated",
+      "evidence_refs": [
+        "TRAINING_LOG.md#exact-inference-command",
+        "reports/runtime-smoke-2026-08-12.md"
+      ],
+      "boundary": "The selected LoRA adapter loaded, merged, and produced a valid WAV. Its weights and frozen neutral-brief output now have recorded hashes."
+    },
+    "evaluation": {
+      "status": "observed",
+      "evidence_refs": ["reports/runtime-smoke-2026-08-12.md"],
+      "boundary": "The frozen neutral brief had ASR WER 0.0. The complete objective suite, speaker evidence, and blind listening remain unrecorded."
+    },
+    "packaging": {
+      "status": "validated",
+      "evidence_refs": ["README.md#lora-fine-tuning-instavar-fork"],
+      "boundary": "Adapter-only save, resume state, and merge were validated, but no promoted release package was recorded."
+    }
+  },
+  "contract_migration": {
+    "experiment_manifest": "blocked",
+    "artifact_package": "blocked",
+    "blockers": [
+      "The historical corpus does not preserve three grouped split hashes.",
+      "The selected adapter is linked only to one short objective prompt, not the complete frozen suite and listening report."
+    ]
+  }
+}
