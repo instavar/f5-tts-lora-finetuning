@@ -13,7 +13,7 @@ class EvaluationSuiteContractTests(unittest.TestCase):
         source = (ROOT / "scripts" / "run_evaluation_suite.py").read_text(encoding="utf-8")
         ast.parse(source)
         self.assertEqual(source.count("engine = F5TTS("), 1)
-        self.assertIn('seed_everything(seed)', source)
+        self.assertIn("seed_everything(seed)", source)
         self.assertIn('infer_sequential(engine, args, row["text"], int(row["seed"]))', source)
         self.assertIn("generation-observations.json", source)
 
