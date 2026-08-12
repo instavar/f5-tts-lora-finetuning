@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "repository": {
     "slug": "instavar/f5-tts-lora-finetuning",
     "url": "https://github.com/instavar/f5-tts-lora-finetuning",
@@ -37,6 +37,19 @@
       "status": "supported",
       "artifact_mode": "adapter",
       "streaming": false,
+      "profile": "reference",
+      "device": "cuda",
+      "interface": "cli",
+      "precision": "runtime default",
+      "batching": false,
+      "conformance": {
+        "status": "validated",
+        "clean_checkout": false,
+        "fresh_process": true,
+        "prompt_count": 7,
+        "seed_count": 3,
+        "report": "reports/runtime-smoke-2026-08-12.md"
+      },
       "evidence": [
         {
           "level": "validated",
@@ -50,6 +63,18 @@
       "status": "unverified_for_adapter",
       "artifact_mode": "merged",
       "streaming": true,
+      "profile": "optimized_cuda",
+      "device": "cuda",
+      "interface": "grpc",
+      "precision": "runtime dependent",
+      "batching": true,
+      "conformance": {
+        "status": "not_run",
+        "clean_checkout": false,
+        "fresh_process": false,
+        "prompt_count": 0,
+        "seed_count": 0
+      },
       "evidence": [
         {
           "level": "repository_declared",
@@ -63,6 +88,18 @@
       "status": "unverified_for_adapter",
       "artifact_mode": "adapter",
       "streaming": false,
+      "profile": "apple_silicon",
+      "device": "mps",
+      "interface": "cli",
+      "precision": "runtime dependent",
+      "batching": false,
+      "conformance": {
+        "status": "not_run",
+        "clean_checkout": false,
+        "fresh_process": false,
+        "prompt_count": 0,
+        "seed_count": 0
+      },
       "evidence": [
         {
           "level": "repository_declared",
@@ -76,6 +113,18 @@
       "status": "unverified_for_adapter",
       "artifact_mode": "merged",
       "streaming": false,
+      "profile": "cpu_edge",
+      "device": "cpu or cuda",
+      "interface": "python",
+      "precision": "runtime dependent",
+      "batching": false,
+      "conformance": {
+        "status": "not_run",
+        "clean_checkout": false,
+        "fresh_process": false,
+        "prompt_count": 0,
+        "seed_count": 0
+      },
       "evidence": [
         {
           "level": "repository_declared",
@@ -88,8 +137,8 @@
   "evaluation": {
     "prompt_pack": {
       "id": "instavar-singapore-english",
-      "version": "1.0.0",
-      "sha256": "79491bec271c0aa1ea1b7dd92dd976476959f1607859a67451652f7c12e56a45"
+      "version": "1.1.0",
+      "sha256": "97999765d5027f1d6b8a51d8e565c767285ef708922611b195d63d3e1184d66f"
     },
     "objective_metrics": [
       "asr_word_error_rate",
@@ -123,6 +172,6 @@
   "known_gaps": [
     "Separate inherited upstream runtime breadth from Instavar's LoRA-specific contribution in release notes.",
     "Reproduce adapter-merged equivalence in Triton, MLX, or ONNX before promoting those runtimes.",
-    "Run the frozen Singapore English blind listening suite against the base model and selected adapter."
+    "The 21-row adapter runtime suite still needs human ratings and a base-model comparison."
   ]
 }

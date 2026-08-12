@@ -18,3 +18,19 @@ The test used prompt `neutral-brief` from `instavar-singapore-english` version 1
 The ASR word error rate was 0.0 and the output was a valid mono PCM WAV with no clipped samples. This is one short prompt and one seed. It establishes bounded execution and intelligibility under the named extractor. It does not establish speaker identity, Singapore English accent fidelity, cadence, naturalness, listening fatigue, warm throughput, or long-session stability. Cold-start real-time factor includes model loading.
 
 Because the runtime checkout had an uncommitted entry, this run validates the observed host state and selected artifact, not a clean reproduction from the named Git revision alone.
+
+## Frozen multi-prompt follow-up
+
+The first multi-prompt run exposed a concurrent long-text defect: five short
+prompts succeeded, while the five-chunk cadence prompt and two-chunk structured
+prompt failed with incompatible tensor shapes. The suite runner now executes
+F5 text chunks sequentially against one loaded model and crossfades adjacent
+chunks. The corrected path completed all 21 planned rows from prompt pack
+1.1.0 across seeds 42, 314159, and 20260812.
+
+The 21 valid outputs contain 385.622 seconds of audio and required 42.856
+seconds of warm generation time after model loading. Peak allocated CUDA memory
+during a sample was 812.9 MiB. Evidence is under
+`/mnt/work/chee-wei-jie/voice-model-outputs/conformance/20260812_instavar_voice_suite_v1_1`.
+This is not a clean-checkout reproduction. No human ratings or base-model
+comparison have been completed.
