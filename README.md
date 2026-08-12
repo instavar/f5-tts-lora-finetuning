@@ -319,7 +319,7 @@ multi-chunk frozen evaluator, and packages the adapter plus preflight, smoke,
 evaluation, experiment, and plan evidence.
 
 Validate the recipe with evaluator merge
-`d63ab559a8e0592bd373f9b51421040b540fb2b7` and use an empty work directory
+`e689ee121ee4a6ae07793ef1c49d70c48b0ad271` and use an empty work directory
 outside the checkout. A passed lifecycle establishes execution and artifact
 lineage. It does not establish that the adapted voice is perceptually better or
 that inherited Triton, MLX, or ONNX runtimes reproduce the PyTorch result.
