@@ -248,7 +248,7 @@ test.
 For an exact cross-runtime experiment, also pass `--artifact-set-id` and
 `--artifact-set-sha256` together. The runner rejects partial or malformed
 bindings. Generate and live-verify the corresponding runtime artifact manifest
-with evaluator revision `e5297b6cda702c99267a2cd95c6ebbeeedd4ecd1` before
+with evaluator revision `ebe3d9957ec2e2a44f687e22d4211545aa5b330c` before
 using `compare-runtimes`. MLX, ONNX, or TensorRT conversion outputs remain
 `derived`, not exact.
 
@@ -327,7 +327,7 @@ multi-chunk frozen evaluator, and packages the adapter plus preflight, smoke,
 evaluation, experiment, and plan evidence.
 
 Validate the recipe with evaluator merge
-`e5297b6cda702c99267a2cd95c6ebbeeedd4ecd1` and use an empty work directory
+`ebe3d9957ec2e2a44f687e22d4211545aa5b330c` and use an empty work directory
 outside the checkout. A passed lifecycle establishes execution and artifact
 lineage. It does not establish that the adapted voice is perceptually better or
 that inherited Triton, MLX, or ONNX runtimes reproduce the PyTorch result.
