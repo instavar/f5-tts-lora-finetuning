@@ -43,13 +43,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sway-sampling-coef", type=float, default=-1.0)
     parser.add_argument("--speed", type=float, default=1.0)
     parser.add_argument("--vocoder-local-path")
+    parser.add_argument(
+        "--allow-invalid-output",
+        action="store_true",
+        help="return success after recording every planned attempt even when an output is invalid",
+    )
     return parser.parse_args()
 
 
 def read_rows(path: Path, candidate_id: str) -> list[dict]:
     plan = json.loads(path.read_text(encoding="utf-8"))
-    if plan.get("schema_version") != "1.0.0":
-        raise ValueError("generation plan schema_version must equal 1.0.0")
+    if plan.get("schema_version") not in {"1.0.0", "1.1.0"}:
+        raise ValueError("generation plan schema_version must equal 1.0.0 or 1.1.0")
     rows = [row for row in plan.get("samples", []) if row.get("candidate_id") == candidate_id]
     if not rows:
         raise ValueError(f"generation plan has no rows for candidate {candidate_id!r}")
@@ -139,6 +144,13 @@ def infer_sequential(engine: F5TTS, args: argparse.Namespace, text: str, seed: i
 
 def main() -> int:
     args = parse_args()
+    device_family = args.device.split(":", 1)[0].casefold()
+    uses_cuda = device_family == "cuda"
+    uses_mps = device_family == "mps"
+    if uses_cuda and not torch.cuda.is_available():
+        raise RuntimeError("CUDA runtime was requested but is unavailable")
+    if uses_mps and not torch.backends.mps.is_available():
+        raise RuntimeError("MPS runtime was requested but is unavailable")
     artifact_fields = runtime_artifact_fields(args)
     rows = read_rows(args.generation_plan, args.candidate_id)
     engine = F5TTS(
@@ -154,9 +166,11 @@ def main() -> int:
     for row in rows:
         output = args.output_dir / row["expected_audio_path"]
         output.parent.mkdir(parents=True, exist_ok=True)
-        if torch.cuda.is_available():
+        if uses_cuda:
             torch.cuda.reset_peak_memory_stats()
             torch.cuda.synchronize()
+        elif uses_mps:
+            torch.mps.synchronize()
         started = time.perf_counter()
         observation = {
             "observation_schema_version": "1.0.0",
@@ -174,8 +188,10 @@ def main() -> int:
         try:
             wave, sample_rate, chunk_count = infer_sequential(engine, args, row["text"], int(row["seed"]))
             sf.write(output, wave, sample_rate)
-            if torch.cuda.is_available():
+            if uses_cuda:
                 torch.cuda.synchronize()
+            elif uses_mps:
+                torch.mps.synchronize()
             elapsed = time.perf_counter() - started
             info = sf.info(output)
             observation.update(
@@ -183,9 +199,13 @@ def main() -> int:
                     "valid": info.frames > 0,
                     "audio_path": str(output),
                     "audio_sha256": sha256(output),
-                    "audio_duration_seconds": float(info.duration),
+                    **({"audio_duration_seconds": float(info.duration)} if info.duration > 0 else {}),
                     "generation_seconds": elapsed,
-                    "peak_memory_bytes": int(torch.cuda.max_memory_allocated()) if torch.cuda.is_available() else 0,
+                    **(
+                        {"peak_memory_bytes": int(torch.cuda.max_memory_allocated())}
+                        if uses_cuda
+                        else {}
+                    ),
                     "inference_chunk_count": chunk_count,
                     "instruction_note": (
                         "F5-TTS has no separate instruction input in this path; the requested text is unchanged."
@@ -195,16 +215,25 @@ def main() -> int:
                 }
             )
         except Exception as error:
+            if uses_cuda:
+                torch.cuda.synchronize()
+            elif uses_mps:
+                torch.mps.synchronize()
             observation.update(
                 {
                     "generation_seconds": time.perf_counter() - started,
+                    **(
+                        {"peak_memory_bytes": int(torch.cuda.max_memory_allocated())}
+                        if uses_cuda
+                        else {}
+                    ),
                     "error_type": type(error).__name__,
                     "error": str(error),
                 }
             )
         observations.append(observation)
         write_observations(args.output_dir / "generation-observations.json", observations)
-    return 0 if all(row["valid"] for row in observations) else 1
+    return 0 if args.allow_invalid_output or all(row["valid"] for row in observations) else 1
 
 
 if __name__ == "__main__":
