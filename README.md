@@ -248,7 +248,7 @@ test.
 For an exact cross-runtime experiment, also pass `--artifact-set-id` and
 `--artifact-set-sha256` together. The runner rejects partial or malformed
 bindings. Generate and live-verify the corresponding runtime artifact manifest
-with evaluator revision `283af52ad28debbdd539837873c9d73ced7c8418` before
+with evaluator revision `6fa431f6ab6bb9867a5fc210a187523012323ecb` before
 using `compare-runtimes`. MLX, ONNX, or TensorRT conversion outputs remain
 `derived`, not exact.
 
@@ -327,7 +327,7 @@ multi-chunk frozen evaluator, and packages the adapter plus preflight, smoke,
 evaluation, experiment, and plan evidence.
 
 Validate the recipe with evaluator merge
-`283af52ad28debbdd539837873c9d73ced7c8418` and use an empty work directory
+`6fa431f6ab6bb9867a5fc210a187523012323ecb` and use an empty work directory
 outside the checkout. A passed lifecycle establishes execution and artifact
 lineage. It does not establish that the adapted voice is perceptually better or
 that inherited Triton, MLX, or ONNX runtimes reproduce the PyTorch result.
@@ -402,14 +402,14 @@ Our code is released under MIT License. The pre-trained models are licensed unde
 [`instavar-voice-capabilities.json`](instavar-voice-capabilities.json) separates the Instavar LoRA path from inherited upstream training, evaluation, and runtime surfaces. It keeps Triton TensorRT-LLM, MLX, and ONNX visible without claiming adapter equivalence that has not been reproduced. CI validates the manifest against the pinned public [Instavar Voice evaluation contract](https://github.com/instavar/instavar-voice-evaluation).
 
 The lifecycle preserves invalid generations as explicit rows, then uses
-evaluator revision `283af52ad28debbdd539837873c9d73ced7c8418` to bind timing,
+evaluator revision `6fa431f6ab6bb9867a5fc210a187523012323ecb` to bind timing,
 duration, and peak-memory fields to the frozen plan and live output audio. Use
 the packaged `objective-observations.json`, not the raw generation file, for a
 version 1.1 runtime comparison.
 
-The pinned evaluator also provides schema 1.2 content-addressed speaker
-reference sets, fixed per-reference aggregation, and embedding-value binding.
-This companion does not bundle a speaker encoder, so that extraction remains an
-explicit external stage. A plan-required speaker metric must use the stronger
-reference-set contract; runtime-bound observations alone are not speaker-quality
-evidence.
+The pinned evaluator also provides schema 1.3 frozen speaker-reference
+assignments, fixed per-reference aggregation, and embedding-value binding. A
+producer must commit or otherwise timestamp the assignment plan before
+generation for stronger chronology evidence. This companion does not bundle a
+speaker encoder or execute that external stage. Runtime-bound observations alone
+are not speaker-quality evidence.
