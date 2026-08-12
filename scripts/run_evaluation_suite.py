@@ -201,11 +201,7 @@ def main() -> int:
                     "audio_sha256": sha256(output),
                     **({"audio_duration_seconds": float(info.duration)} if info.duration > 0 else {}),
                     "generation_seconds": elapsed,
-                    **(
-                        {"peak_memory_bytes": int(torch.cuda.max_memory_allocated())}
-                        if uses_cuda
-                        else {}
-                    ),
+                    **({"peak_memory_bytes": int(torch.cuda.max_memory_allocated())} if uses_cuda else {}),
                     "inference_chunk_count": chunk_count,
                     "instruction_note": (
                         "F5-TTS has no separate instruction input in this path; the requested text is unchanged."
@@ -222,11 +218,7 @@ def main() -> int:
             observation.update(
                 {
                     "generation_seconds": time.perf_counter() - started,
-                    **(
-                        {"peak_memory_bytes": int(torch.cuda.max_memory_allocated())}
-                        if uses_cuda
-                        else {}
-                    ),
+                    **({"peak_memory_bytes": int(torch.cuda.max_memory_allocated())} if uses_cuda else {}),
                     "error_type": type(error).__name__,
                     "error": str(error),
                 }

@@ -296,17 +296,41 @@ def _evaluate() -> None:
     bound_observations = output / "objective-observations.json"
     plan = _path("GENERATION_PLAN")
     producer_revision = _git_head()
-    _run([
-        sys.executable, "-m", "instavar_voice_lab.cli", "build-generation-attempt-receipt",
-        str(raw_observations), "--plan", str(plan), "--audio-base-dir", str(output),
-        "--producer-name", "f5-evaluation-runner", "--producer-revision", producer_revision,
-        "--output", str(receipt),
-    ])
-    _run([
-        sys.executable, "-m", "instavar_voice_lab.cli", "apply-generation-attempt-receipt",
-        str(raw_observations), str(receipt), "--plan", str(plan), "--audio-base-dir", str(output),
-        "--output", str(bound_observations),
-    ])
+    _run(
+        [
+            sys.executable,
+            "-m",
+            "instavar_voice_lab.cli",
+            "build-generation-attempt-receipt",
+            str(raw_observations),
+            "--plan",
+            str(plan),
+            "--audio-base-dir",
+            str(output),
+            "--producer-name",
+            "f5-evaluation-runner",
+            "--producer-revision",
+            producer_revision,
+            "--output",
+            str(receipt),
+        ]
+    )
+    _run(
+        [
+            sys.executable,
+            "-m",
+            "instavar_voice_lab.cli",
+            "apply-generation-attempt-receipt",
+            str(raw_observations),
+            str(receipt),
+            "--plan",
+            str(plan),
+            "--audio-base-dir",
+            str(output),
+            "--output",
+            str(bound_observations),
+        ]
+    )
     _archive(output, work / "evaluate" / "evaluation-bundle.tar", arcname="evaluation")
 
 
