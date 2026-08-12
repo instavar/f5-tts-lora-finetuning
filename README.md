@@ -221,6 +221,29 @@ Read [training & finetuning guidance](src/f5_tts/train) for more instructions.
 
 ## [Evaluation](src/f5_tts/eval)
 
+### Frozen multi-prompt adapter evaluation
+
+Load a selected LoRA adapter once and execute every F5-TTS row in an Instavar
+Voice generation plan:
+
+```bash
+python scripts/run_evaluation_suite.py \
+  --model F5TTS_Base \
+  --model-checkpoint /path/to/model_1200000.safetensors \
+  --adapter /path/to/lora_step_1250 \
+  --reference-audio /path/to/reference.wav \
+  --reference-text "The exact transcript of the reference audio." \
+  --generation-plan evaluation/generation-plan.json \
+  --candidate-id f5-lora1250 \
+  --output-dir evaluation/f5-lora1250
+```
+
+The runner records every planned attempt and uses the frozen seed per sample.
+The F5 path has no separate style-instruction input, so instruction prompts are
+generated from the unchanged transcript and explicitly marked as not applied.
+This makes the capability difference visible instead of silently rewriting the
+test.
+
 
 ## Development
 
