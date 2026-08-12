@@ -11,6 +11,7 @@
     { "name": "RAW_VALIDATION_JSONL", "purpose": "Raw validation split used for grouped corpus audit." },
     { "name": "RAW_TEST_JSONL", "purpose": "Raw test split used for grouped corpus audit." },
     { "name": "DATASET_NAME", "purpose": "F5-TTS prepared dataset identifier." },
+    { "name": "DATASET_LINEAGE", "purpose": "Content-addressed receipt binding audited splits to the complete prepared dataset tree." },
     { "name": "BASE_MODEL_CHECKPOINT", "purpose": "Pinned base F5-TTS checkpoint used for LoRA training and inference." },
     { "name": "REFERENCE_AUDIO", "purpose": "Authorized reference-speaker audio for reload and held-out synthesis." },
     { "name": "REFERENCE_TEXT", "purpose": "Transcript matching the authorized reference audio." },

@@ -1,6 +1,6 @@
 # Instavar Voice conformance
 
-This repository declares its model-specific adaptation and runtime surface in `instavar-voice-capabilities.json`. The manifest and executable [`instavar-voice-backend.json`](instavar-voice-backend.json) LoRA recipe use the public [Instavar Voice evaluation contract](https://github.com/instavar/instavar-voice-evaluation) pinned by CI to merge commit `e689ee121ee4a6ae07793ef1c49d70c48b0ad271`.
+This repository declares its model-specific adaptation and runtime surface in `instavar-voice-capabilities.json`. The manifest and executable [`instavar-voice-backend.json`](instavar-voice-backend.json) LoRA recipe use the public [Instavar Voice evaluation contract](https://github.com/instavar/instavar-voice-evaluation) pinned by CI to commit `31bc7b7b97bb7a291a44fc1591620960c2cc2d2d`.
 
 The backend adds an explicit checkpoint-output boundary to the trainer, audits grouped splits, reloads one selected adapter, uses the sequential long-form evaluator, and packages the adapter with experiment and evaluation evidence. CI validates and dependency-tests the recipe without performing GPU training.
 

@@ -69,6 +69,40 @@ def _git_clean() -> bool:
     return not _run(["git", "status", "--porcelain=v1", "--untracked-files=all"], capture=True)
 
 
+def _prepared_dataset() -> Path:
+    name = os.environ["DATASET_NAME"].strip()
+    candidate = Path(name)
+    if not name or name in {".", ".."} or candidate.is_absolute() or len(candidate.parts) != 1:
+        raise ValueError("DATASET_NAME must be one safe dataset identifier")
+    return _path_from_value(REPO_ROOT / "data" / f"{name}_pinyin", directory=True, label="prepared dataset")
+
+
+def _path_from_value(value: Path, *, directory: bool, label: str) -> Path:
+    if value.is_symlink():
+        raise FileNotFoundError(f"{label} is a symlink: {value}")
+    path = value.resolve()
+    valid = path.is_dir() if directory else path.is_file()
+    if not valid:
+        raise FileNotFoundError(f"{label} is missing: {path}")
+    return path
+
+
+def _verify_dataset_lineage() -> dict[str, Any]:
+    from instavar_voice_lab.lineage import verify_dataset_lineage
+
+    document = json.loads(_path("DATASET_LINEAGE").read_text(encoding="utf-8"))
+    return verify_dataset_lineage(
+        document,
+        producer_revision=_git_head(),
+        inputs={
+            "raw_train": (_path("RAW_TRAIN_JSONL"), "file"),
+            "raw_validation": (_path("RAW_VALIDATION_JSONL"), "file"),
+            "raw_test": (_path("RAW_TEST_JSONL"), "file"),
+        },
+        outputs={"prepared_dataset": (_prepared_dataset(), "tree")},
+    )
+
+
 def _archive(source: Path, destination: Path, *, arcname: str) -> None:
     if source.is_symlink() or not source.is_dir():
         raise ValueError(f"archive source must be a non-symlink directory: {source}")
@@ -120,6 +154,7 @@ def _preflight() -> None:
         raise ValueError("experiment backend.instavar_revision does not match the F5 checkout")
     if experiment.get("backend", {}).get("upstream_revision") != UPSTREAM_BASE_REVISION:
         raise ValueError("experiment backend.upstream_revision does not match the pinned F5 upstream base")
+    lineage = _verify_dataset_lineage()
     splits = {
         "train": _path("RAW_TRAIN_JSONL"),
         "validation": _path("RAW_VALIDATION_JSONL"),
@@ -146,11 +181,13 @@ def _preflight() -> None:
             "base_checkpoint_bytes": base.stat().st_size,
             "corpus_audit": audit,
             "generation_rows": len(rows),
+            "dataset_lineage": lineage,
         },
     )
 
 
 def _train() -> None:
+    _verify_dataset_lineage()
     work = _work()
     output = work / "train" / "output"
     command = [
@@ -268,6 +305,7 @@ def _package() -> None:
         "smoke-candidate.wav": work / "infer" / "candidate.wav",
         "experiment-manifest.json": _path("INSTAVAR_VOICE_EXPERIMENT_MANIFEST"),
         "generation-plan.json": _path("GENERATION_PLAN"),
+        "dataset-lineage.json": _path("DATASET_LINEAGE"),
     }
     for name, source in sources.items():
         if source.is_symlink() or not source.is_file() or source.stat().st_size == 0:
@@ -299,6 +337,8 @@ def run(stage: str) -> None:
     if stage not in actions:
         raise ValueError(f"unknown lifecycle stage: {stage}")
     actions[stage]()
+    if stage in {"preflight", "train"}:
+        _verify_dataset_lineage()
     _write_json(
         Path(os.environ["INSTAVAR_VOICE_STAGE_RESULT"]), {"schema_version": "1.0.0", "stage": stage, "status": "passed"}
     )
