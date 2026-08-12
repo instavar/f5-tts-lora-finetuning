@@ -307,6 +307,23 @@ scripts/run_with_corpus_audit.sh \
   --batch_size_type frame
 ```
 
+### Executable Instavar Voice lifecycle
+
+[`instavar-voice-backend.json`](instavar-voice-backend.json) binds LoRA training
+and PyTorch merged-adapter inference to a real five-stage lifecycle. The trainer
+now accepts `--checkpoint_path`, so lifecycle artifacts are written under the
+unique work directory instead of the repository's shared `ckpts/` tree. The
+wrapper audits grouped splits, selects one exact adapter directory, reloads it
+in a fresh process with the same optional vocabulary file, uses the sequential
+multi-chunk frozen evaluator, and packages the adapter plus preflight, smoke,
+evaluation, experiment, and plan evidence.
+
+Validate the recipe with evaluator merge
+`d63ab559a8e0592bd373f9b51421040b540fb2b7` and use an empty work directory
+outside the checkout. A passed lifecycle establishes execution and artifact
+lineage. It does not establish that the adapted voice is perceptually better or
+that inherited Triton, MLX, or ONNX runtimes reproduce the PyTorch result.
+
 ### LoRA CLI Arguments
 
 | Argument | Default | Description |

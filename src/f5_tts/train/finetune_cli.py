@@ -49,6 +49,12 @@ def parse_args():
         help="-1 to keep all, 0 to not save intermediate, > 0 to keep last N checkpoints",
     )
     parser.add_argument("--last_per_updates", type=int, default=5000, help="Save last checkpoint every N updates")
+    parser.add_argument(
+        "--checkpoint_path",
+        type=str,
+        default=None,
+        help="Explicit checkpoint output directory. Defaults to ckpts/<dataset_name>.",
+    )
     parser.add_argument("--finetune", action="store_true", help="Use Finetune")
     parser.add_argument("--pretrain", type=str, default=None, help="the path to the checkpoint")
     parser.add_argument(
@@ -96,7 +102,7 @@ def parse_args():
 def main():
     args = parse_args()
 
-    checkpoint_path = str(files("f5_tts").joinpath(f"../../ckpts/{args.dataset_name}"))
+    checkpoint_path = args.checkpoint_path or str(files("f5_tts").joinpath(f"../../ckpts/{args.dataset_name}"))
 
     # Model parameters based on experiment name
 
