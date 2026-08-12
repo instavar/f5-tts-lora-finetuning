@@ -29,4 +29,6 @@ jobs:
       - name: Validate executable lifecycle backend
         run: python .instavar-voice-evaluation/main.py validate-backend instavar-voice-backend.json
       - name: Test lifecycle wrapper without model dependencies
+        env:
+          PYTHONPATH: .instavar-voice-evaluation
         run: python -m unittest tests/test_lifecycle_backend.py -v
