@@ -248,7 +248,7 @@ test.
 For an exact cross-runtime experiment, also pass `--artifact-set-id` and
 `--artifact-set-sha256` together. The runner rejects partial or malformed
 bindings. Generate and live-verify the corresponding runtime artifact manifest
-with evaluator revision `2088146501081138b87e8e398eda610a392c0d4d` before
+with evaluator revision `8feadf7bbda75abe1c305c63e362c41b86451cda` before
 using `compare-runtimes`. MLX, ONNX, or TensorRT conversion outputs remain
 `derived`, not exact.
 
@@ -327,7 +327,7 @@ multi-chunk frozen evaluator, and packages the adapter plus preflight, smoke,
 evaluation, experiment, and plan evidence.
 
 Validate the recipe with evaluator merge
-`2088146501081138b87e8e398eda610a392c0d4d` and use an empty work directory
+`8feadf7bbda75abe1c305c63e362c41b86451cda` and use an empty work directory
 outside the checkout. A passed lifecycle establishes execution and artifact
 lineage. It does not establish that the adapted voice is perceptually better or
 that inherited Triton, MLX, or ONNX runtimes reproduce the PyTorch result.
@@ -402,7 +402,7 @@ Our code is released under MIT License. The pre-trained models are licensed unde
 [`instavar-voice-capabilities.json`](instavar-voice-capabilities.json) separates the Instavar LoRA path from inherited upstream training, evaluation, and runtime surfaces. It keeps Triton TensorRT-LLM, MLX, and ONNX visible without claiming adapter equivalence that has not been reproduced. CI validates the manifest against the pinned public [Instavar Voice evaluation contract](https://github.com/instavar/instavar-voice-evaluation).
 
 The lifecycle preserves invalid generations as explicit rows, then uses
-evaluator revision `2088146501081138b87e8e398eda610a392c0d4d` to bind timing,
+evaluator revision `8feadf7bbda75abe1c305c63e362c41b86451cda` to bind timing,
 duration, and peak-memory fields to the frozen plan and live output audio. Use
 the packaged `objective-observations.json`, not the raw generation file, for a
 version 1.1 runtime comparison.
@@ -431,6 +431,11 @@ Version 0.26 adds deterministic per-rater presentation schedules that
 counterbalance candidate precedence within each prompt and seed. Aggregation
 recomputes the private audit, requires the scheduled pseudonymous rater set,
 and keeps order, fatigue, carryover, and reviewer-compliance limits explicit.
+Version 0.27 exports one privacy-preserving packet per pseudonymous rater and
+binds criterion-major presentation logs plus ratings into canonical submission
+receipts. Aggregation reconstructs each packet, rejects forged metadata, and
+records missing reviewers or cells as attrition. Receipt hashes establish
+content integrity, not reviewer identity, delivery, attention, or independence.
 This companion bundles neither model
 weights nor optional extractor dependencies and runs neither learned metric
 automatically. Run them explicitly after generation with trusted, content-addressed
