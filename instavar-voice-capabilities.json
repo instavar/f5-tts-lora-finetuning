@@ -3,7 +3,7 @@
   "repository": {
     "slug": "instavar/f5-tts-lora-finetuning",
     "url": "https://github.com/instavar/f5-tts-lora-finetuning",
-    "evidence_revision": "799d02d126b512d64a3d0223fcd5125917b097cb"
+    "evidence_revision": "761ae39710848830ff9e62587eaceacf4cd7b000"
   },
   "model": {
     "family": "F5-TTS",
