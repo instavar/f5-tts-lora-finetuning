@@ -349,6 +349,41 @@ rights, or the existence of a real promoted package until the lifecycle runs.
 | `--lora_alpha` | `16` | LoRA alpha. Scaling factor = alpha/rank |
 | `--lora_dropout` | `0.0` | Dropout on LoRA layers (0.0 recommended for small datasets) |
 | `--lora_target_modules` | `to_q to_k to_v to_out.0` | Which layers to apply LoRA to |
+| `--resume_from` | empty | Exact immutable `lora_N` directory to resume; never auto-selected |
+| `--trust_resume_state` | `False` | Explicitly trust PyTorch optimizer and runtime state for resume |
+
+### Guarded LoRA interruption resume
+
+New LoRA runs publish immutable `lora_N` directories after complete optimizer
+updates. Each directory binds adapter bytes, optimizer and scheduler state, AMP
+scaler and RNG state, epoch and within-epoch batch position, the base
+checkpoint, the complete local dataset tree, optional tokenizer, trainer
+sources, training controls, runtime versions, and the output directory. The
+directory appears atomically only after its sidecar and every continuation file
+are complete.
+
+Resume is explicit:
+
+```bash
+accelerate launch src/f5_tts/train/finetune_cli.py \
+  ...the exact original LoRA arguments... \
+  --resume_from /absolute/path/to/ckpts/my_speaker/lora_500 \
+  --trust_resume_state
+```
+
+The guard rejects mutable `lora_last`, symlinks, nested paths, changed adapter
+or state bytes, changed base or dataset content, source, runtime, output, or
+training-control drift, completed targets, and `world_size != 1`. The target
+epoch count must remain identical because this is interruption recovery, not a
+new continuation experiment. `lora_last` is now an atomic relative symlink for
+inference convenience only and is never a resume authority.
+
+Both frame and sample batching use epoch-addressable ordering. The trainer
+replays the recorded number of batches before restoring post-checkpoint model
+RNG state. Sample-audio logging runs before the checkpoint captures RNG so a
+resumed process does not silently omit randomness consumed by the uninterrupted
+path. These mechanics are contract-tested but have not passed a real
+interrupted-versus-uninterrupted GPU comparison.
 
 ### Target Modules
 
@@ -389,7 +424,7 @@ lora_path = "ckpts/my_speaker/lora_last"
 - **No EMA in LoRA mode**: The base model already has well-trained EMA weights from pre-training. LoRA adds a small delta. This matches community practice for diffusion LoRA (Kohya, diffusers).
 - **Separate adapter checkpoints**: LoRA saves `adapter_config.json` + `adapter_model.safetensors` (~6 MB) instead of full model checkpoints (~2.7 GB).
 - **Merge at inference**: `merge_and_unload()` bakes LoRA weights into the base model, producing a standard `nn.Module` with zero inference overhead.
-- **Resumable training**: Optimizer and scheduler states are saved alongside LoRA adapters for training resumption.
+- **Guarded resumable training**: Immutable numbered checkpoints preserve optimizer, scheduler, scaler, RNG, and exact data position under a content-bound single-process contract. `lora_last` remains inference-only.
 
 ## Citation
 If our work and codebase is useful for you, please cite as:

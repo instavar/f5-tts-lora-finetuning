@@ -1,13 +1,18 @@
 import argparse
+import importlib.metadata
 import os
+import platform
 import shutil
 from importlib.resources import files
+from pathlib import Path
 
 from cached_path import cached_path
+import torch
 
 from f5_tts.model import CFM, DiT, Trainer, UNetT
 from f5_tts.model.dataset import load_dataset
 from f5_tts.model.utils import get_tokenizer
+from f5_tts.train.lora_resume_contract import build_contract, require_fresh_output
 
 
 # -------------------------- Dataset Settings --------------------------- #
@@ -92,6 +97,17 @@ def parse_args():
         default=["to_q", "to_k", "to_v", "to_out.0"],
         help="Target module names for LoRA injection (default: attention Q/K/V/O projections)",
     )
+    parser.add_argument(
+        "--resume_from",
+        type=str,
+        default="",
+        help="Exact immutable lora_N checkpoint directory to resume. Never selected implicitly.",
+    )
+    parser.add_argument(
+        "--trust_resume_state",
+        action="store_true",
+        help="Acknowledge that trusted PyTorch optimizer state will be deserialized.",
+    )
 
     return parser.parse_args()
 
@@ -103,6 +119,13 @@ def main():
     args = parse_args()
 
     checkpoint_path = args.checkpoint_path or str(files("f5_tts").joinpath(f"../../ckpts/{args.dataset_name}"))
+
+    if args.resume_from and not args.lora:
+        raise ValueError("Guarded resume_from is supported only for the Instavar LoRA path")
+    if args.trust_resume_state and not args.resume_from:
+        raise ValueError("trust_resume_state requires an explicit resume_from checkpoint")
+    if args.lora and not args.finetune:
+        raise ValueError("LoRA training requires --finetune so the base checkpoint is explicit and bound")
 
     # Model parameters based on experiment name
 
@@ -170,6 +193,57 @@ def main():
         if not os.path.isfile(file_checkpoint):
             shutil.copy2(ckpt_path, file_checkpoint)
             print("copy checkpoint for finetune")
+
+    if args.lora:
+        Path(checkpoint_path).resolve(strict=True)
+        if not args.resume_from:
+            require_fresh_output(checkpoint_path)
+        dataset_root = Path(str(files("f5_tts").joinpath(f"../../data/{args.dataset_name}_{args.tokenizer}")))
+        resume_contract = build_contract(
+            output_dir=checkpoint_path,
+            base_checkpoint=ckpt_path,
+            dataset_root=dataset_root,
+            optional_files={"tokenizer": args.tokenizer_path if args.tokenizer == "custom" else None},
+            source_files=[
+                Path(__file__),
+                Path(__file__).with_name("lora_resume_contract.py"),
+                Path(__file__).parents[1] / "model" / "trainer.py",
+                Path(__file__).parents[1] / "model" / "dataset.py",
+                Path(__file__).parents[1] / "model" / "cfm.py",
+            ],
+            training_config={
+                "exp_name": args.exp_name,
+                "dataset_name": args.dataset_name,
+                "tokenizer": args.tokenizer,
+                "learning_rate": args.learning_rate,
+                "batch_size_per_gpu": args.batch_size_per_gpu,
+                "batch_size_type": args.batch_size_type,
+                "max_samples": args.max_samples,
+                "grad_accumulation_steps": args.grad_accumulation_steps,
+                "max_grad_norm": args.max_grad_norm,
+                "epochs": args.epochs,
+                "num_warmup_updates": args.num_warmup_updates,
+                "save_per_updates": args.save_per_updates,
+                "last_per_updates": args.last_per_updates,
+                "keep_last_n_checkpoints": args.keep_last_n_checkpoints,
+                "bnb_optimizer": args.bnb_optimizer,
+                "lora_rank": args.lora_rank,
+                "lora_alpha": args.lora_alpha,
+                "lora_dropout": args.lora_dropout,
+                "lora_target_modules": args.lora_target_modules,
+                "shuffle_seed": 666,
+            },
+            runtime={
+                "python": platform.python_version(),
+                "torch": importlib.metadata.version("torch"),
+                "accelerate": importlib.metadata.version("accelerate"),
+                "peft": importlib.metadata.version("peft"),
+                "cuda": torch.version.cuda,
+                "world_size": int(os.environ.get("WORLD_SIZE", "1")),
+            },
+        )
+    else:
+        resume_contract = None
 
     # Use the tokenizer and tokenizer_path provided in the command line arguments
 
@@ -248,6 +322,9 @@ def main():
         last_per_updates=args.last_per_updates,
         bnb_optimizer=args.bnb_optimizer,
         use_lora=args.lora,
+        resume_from=args.resume_from,
+        trust_resume_state=args.trust_resume_state,
+        resume_contract=resume_contract,
     )
 
     train_dataset = load_dataset(args.dataset_name, tokenizer, mel_spec_kwargs=mel_spec_kwargs)

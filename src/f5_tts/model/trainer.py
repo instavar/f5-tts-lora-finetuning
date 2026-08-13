@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import gc
+import json
 import math
 import os
+import random
+import shutil
 
+import numpy as np
 import torch
 import torchaudio
 import wandb
@@ -16,8 +20,15 @@ from torch.utils.data import DataLoader, Dataset, SequentialSampler
 from tqdm import tqdm
 
 from f5_tts.model import CFM
-from f5_tts.model.dataset import DynamicBatchSampler, collate_fn
+from f5_tts.model.dataset import DynamicBatchSampler, EpochRandomSampler, collate_fn
 from f5_tts.model.utils import default, exists
+from f5_tts.train.lora_resume_contract import (
+    RUNTIME_STATE_NAME,
+    STATE_NAME,
+    prunable_checkpoints,
+    validate_checkpoint,
+    write_sidecar,
+)
 
 
 # trainer
@@ -54,6 +65,9 @@ class Trainer:
         local_vocoder_path: str = "",  # local vocoder path
         model_cfg_dict: dict = dict(),  # training config
         use_lora: bool = False,  # LoRA fine-tuning mode (disables EMA, saves only adapter weights)
+        resume_from: str = "",
+        trust_resume_state: bool = False,
+        resume_contract: dict | None = None,
     ):
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
 
@@ -104,6 +118,14 @@ class Trainer:
 
         self.model = model
         self.use_lora = use_lora
+        self.resume_from = resume_from
+        self.trust_resume_state = trust_resume_state
+        self.resume_contract = resume_contract
+        self._resume_state = {"completed_updates": 0, "data_epoch": 0, "batches_consumed_in_epoch": 0}
+        self._resume_runtime_state = None
+        self._saved_lora_updates: set[int] = set()
+        if self.use_lora and self.resume_contract is None:
+            raise ValueError("LoRA training requires a guarded resume contract")
 
         if self.is_main:
             if self.use_lora:
@@ -161,39 +183,89 @@ class Trainer:
                 os.makedirs(self.checkpoint_path)
 
             if self.use_lora:
-                # LoRA mode: save only adapter weights via PEFT (tiny files)
+                if update < 1:
+                    raise ValueError("A resumable LoRA checkpoint requires one completed optimizer update")
                 unwrapped = self.accelerator.unwrap_model(self.model)
-                lora_dir = f"{self.checkpoint_path}/lora_last" if last else f"{self.checkpoint_path}/lora_{update}"
-                unwrapped.save_pretrained(lora_dir)
-                # Also save optimizer + scheduler for resumption
-                torch.save(
-                    dict(
-                        optimizer_state_dict=self.optimizer.state_dict(),
-                        scheduler_state_dict=self.scheduler.state_dict(),
-                        update=update,
-                    ),
-                    os.path.join(lora_dir, "training_state.pt"),
-                )
-                if last:
-                    print(f"Saved LoRA adapter at update {update} -> {lora_dir}")
+                final_dir = os.path.join(self.checkpoint_path, f"lora_{update}")
+                if os.path.lexists(final_dir):
+                    if update not in self._saved_lora_updates:
+                        raise FileExistsError(f"Refusing to reuse unowned immutable LoRA checkpoint: {final_dir}")
                 else:
-                    if self.keep_last_n_checkpoints > 0:
-                        import shutil
-
-                        lora_dirs = sorted(
-                            [
-                                d
-                                for d in os.listdir(self.checkpoint_path)
-                                if d.startswith("lora_")
-                                and d != "lora_last"
-                                and os.path.isdir(os.path.join(self.checkpoint_path, d))
-                            ],
-                            key=lambda x: int(x.split("_")[1]),
+                    lora_dir = os.path.join(self.checkpoint_path, f".lora_{update}.partial.{os.getpid()}")
+                    os.mkdir(lora_dir)
+                    unwrapped.save_pretrained(lora_dir)
+                    training_state_path = os.path.join(lora_dir, "training_state.pt")
+                    torch.save(
+                        dict(
+                            optimizer_state_dict=self.optimizer.state_dict(),
+                            scheduler_state_dict=self.scheduler.state_dict(),
+                            update=update,
+                        ),
+                        training_state_path,
+                    )
+                    scaler_state = (
+                        self.accelerator.scaler.state_dict()
+                        if self.accelerator.scaler is not None and hasattr(self.accelerator.scaler, "state_dict")
+                        else None
+                    )
+                    torch.save(
+                        {
+                            "python_rng_state": random.getstate(),
+                            "numpy_rng_state": np.random.get_state(),
+                            "torch_rng_state": torch.get_rng_state(),
+                            "cuda_rng_state": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+                            "scaler_state": scaler_state,
+                        },
+                        os.path.join(lora_dir, RUNTIME_STATE_NAME),
+                    )
+                    with open(os.path.join(lora_dir, STATE_NAME), "x", encoding="utf-8") as handle:
+                        json.dump(
+                            {
+                                "completed_updates": int(update),
+                                "data_epoch": int(self._data_epoch),
+                                "batches_consumed_in_epoch": int(self._batches_consumed_in_epoch),
+                            },
+                            handle,
+                            indent=2,
+                            sort_keys=True,
                         )
-                        while len(lora_dirs) > self.keep_last_n_checkpoints:
-                            oldest = lora_dirs.pop(0)
-                            shutil.rmtree(os.path.join(self.checkpoint_path, oldest))
-                            print(f"Removed old LoRA checkpoint: {oldest}")
+                        handle.write("\n")
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    write_sidecar(
+                        lora_dir,
+                        contract=self.resume_contract,
+                        completed_updates=update,
+                        required_files=[
+                            "adapter_config.json",
+                            "adapter_model.safetensors",
+                            "training_state.pt",
+                            STATE_NAME,
+                            RUNTIME_STATE_NAME,
+                        ],
+                    )
+                    os.replace(lora_dir, final_dir)
+                    self._saved_lora_updates.add(update)
+                    directory_fd = os.open(self.checkpoint_path, os.O_RDONLY)
+                    try:
+                        os.fsync(directory_fd)
+                    finally:
+                        os.close(directory_fd)
+
+                pointer = os.path.join(self.checkpoint_path, "lora_last")
+                temporary_pointer = os.path.join(self.checkpoint_path, f".lora_last.{os.getpid()}.tmp")
+                if os.path.lexists(temporary_pointer):
+                    os.unlink(temporary_pointer)
+                os.symlink(os.path.basename(final_dir), temporary_pointer, target_is_directory=True)
+                os.replace(temporary_pointer, pointer)
+
+                if last:
+                    print(f"Saved LoRA adapter at update {update} -> {final_dir}")
+                if self.keep_last_n_checkpoints > 0:
+                    for oldest in prunable_checkpoints(self.checkpoint_path, self.keep_last_n_checkpoints):
+                        shutil.rmtree(oldest)
+                        self._saved_lora_updates.discard(int(oldest.name.split("_")[1]))
+                        print(f"Removed old LoRA checkpoint: {oldest.name}")
             else:
                 checkpoint = dict(
                     model_state_dict=self.accelerator.unwrap_model(self.model).state_dict(),
@@ -230,26 +302,16 @@ class Trainer:
 
         dir_contents = os.listdir(self.checkpoint_path)
 
-        # LoRA mode: look for lora_last or lora_N directories
         if self.use_lora:
-            lora_dirs = sorted(
-                [
-                    d
-                    for d in dir_contents
-                    if d.startswith("lora_") and os.path.isdir(os.path.join(self.checkpoint_path, d))
-                ],
-                key=lambda x: 0 if x == "lora_last" else int(x.split("_")[1]),
-            )
-            if not lora_dirs:
-                # No LoRA checkpoint yet — base weights already loaded via pretrained checkpoint copy
-                # (the pretrained_ file is loaded into the base model before PEFT wrapping in finetune_cli.py)
+            if not self.resume_from:
                 return 0
-
-            # Prefer lora_last, else latest numbered
-            if "lora_last" in lora_dirs:
-                lora_dir = os.path.join(self.checkpoint_path, "lora_last")
-            else:
-                lora_dir = os.path.join(self.checkpoint_path, lora_dirs[-1])
+            lora_dir, self._resume_state, _ = validate_checkpoint(
+                self.resume_from,
+                output_dir=self.checkpoint_path,
+                expected_contract=self.resume_contract,
+                trust_resume_state=self.trust_resume_state,
+                world_size=self.accelerator.num_processes,
+            )
 
             self.accelerator.wait_for_everyone()
 
@@ -258,22 +320,23 @@ class Trainer:
             from safetensors.torch import load_file
 
             adapter_path = os.path.join(lora_dir, "adapter_model.safetensors")
-            if os.path.exists(adapter_path):
-                adapter_state = load_file(adapter_path, device="cpu")
-                set_peft_model_state_dict(self.accelerator.unwrap_model(self.model), adapter_state)
-                print(f"Loaded LoRA adapter from {lora_dir}")
+            adapter_state = load_file(adapter_path, device="cpu")
+            set_peft_model_state_dict(self.accelerator.unwrap_model(self.model), adapter_state)
+            print(f"Loaded LoRA adapter from {lora_dir}")
 
             # Load optimizer/scheduler state for resumption
             training_state_path = os.path.join(lora_dir, "training_state.pt")
-            if os.path.exists(training_state_path):
-                training_state = torch.load(training_state_path, weights_only=True, map_location="cpu")
-                self.optimizer.load_state_dict(training_state["optimizer_state_dict"])
-                if self.scheduler:
-                    self.scheduler.load_state_dict(training_state["scheduler_state_dict"])
-                update = training_state["update"]
-                del training_state
-            else:
-                update = 0
+            training_state = torch.load(training_state_path, weights_only=True, map_location="cpu")
+            if training_state.get("update") != self._resume_state["completed_updates"]:
+                raise ValueError("LoRA optimizer state disagrees with the validated completed-update boundary")
+            self.optimizer.load_state_dict(training_state["optimizer_state_dict"])
+            if self.scheduler:
+                self.scheduler.load_state_dict(training_state["scheduler_state_dict"])
+            update = training_state["update"]
+            del training_state
+            self._resume_runtime_state = torch.load(
+                os.path.join(lora_dir, RUNTIME_STATE_NAME), weights_only=False, map_location="cpu"
+            )
 
             gc.collect()
             return update
@@ -359,13 +422,8 @@ class Trainer:
             log_samples_path = f"{self.checkpoint_path}/samples"
             os.makedirs(log_samples_path, exist_ok=True)
 
-        if exists(resumable_with_seed):
-            generator = torch.Generator()
-            generator.manual_seed(resumable_with_seed)
-        else:
-            generator = None
-
         if self.batch_size_type == "sample":
+            sampler = EpochRandomSampler(train_dataset, resumable_with_seed) if exists(resumable_with_seed) else None
             train_dataloader = DataLoader(
                 train_dataset,
                 collate_fn=collate_fn,
@@ -373,8 +431,8 @@ class Trainer:
                 pin_memory=True,
                 persistent_workers=True,
                 batch_size=self.batch_size_per_gpu,
-                shuffle=True,
-                generator=generator,
+                shuffle=sampler is None,
+                sampler=sampler,
             )
         elif self.batch_size_type == "frame":
             self.accelerator.even_batches = False
@@ -415,28 +473,28 @@ class Trainer:
         )  # actual multi_gpu updates = single_gpu updates / gpu nums
         start_update = self.load_checkpoint()
         global_update = start_update
-
-        if exists(resumable_with_seed):
-            orig_epoch_step = len(train_dataloader)
-            start_step = start_update * self.grad_accumulation_steps
-            skipped_epoch = int(start_step // orig_epoch_step)
-            skipped_batch = start_step % orig_epoch_step
-            skipped_dataloader = self.accelerator.skip_first_batches(train_dataloader, num_batches=skipped_batch)
-        else:
-            skipped_epoch = 0
+        skipped_epoch = int(self._resume_state["data_epoch"])
+        skipped_batch = int(self._resume_state["batches_consumed_in_epoch"])
+        restore_runtime_state = self._resume_runtime_state
 
         for epoch in range(skipped_epoch, self.epochs):
             self.model.train()
-            if exists(resumable_with_seed) and epoch == skipped_epoch:
+            if hasattr(train_dataloader, "set_epoch"):
+                train_dataloader.set_epoch(epoch)
+            elif hasattr(train_dataloader, "batch_sampler") and hasattr(train_dataloader.batch_sampler, "set_epoch"):
+                train_dataloader.batch_sampler.set_epoch(epoch)
+
+            if epoch == skipped_epoch and skipped_batch:
                 progress_bar_initial = math.ceil(skipped_batch / self.grad_accumulation_steps)
-                current_dataloader = skipped_dataloader
+                current_dataloader = self.accelerator.skip_first_batches(
+                    train_dataloader, num_batches=skipped_batch
+                )
+                self._batches_consumed_in_epoch = skipped_batch
             else:
                 progress_bar_initial = 0
                 current_dataloader = train_dataloader
-
-            # Set epoch for the batch sampler if it exists
-            if hasattr(train_dataloader, "batch_sampler") and hasattr(train_dataloader.batch_sampler, "set_epoch"):
-                train_dataloader.batch_sampler.set_epoch(epoch)
+                self._batches_consumed_in_epoch = 0
+            self._data_epoch = epoch
 
             progress_bar = tqdm(
                 range(math.ceil(len(train_dataloader) / self.grad_accumulation_steps)),
@@ -447,6 +505,21 @@ class Trainer:
             )
 
             for batch in current_dataloader:
+                if restore_runtime_state is not None:
+                    random.setstate(restore_runtime_state["python_rng_state"])
+                    np.random.set_state(restore_runtime_state["numpy_rng_state"])
+                    torch.set_rng_state(restore_runtime_state["torch_rng_state"])
+                    if torch.cuda.is_available() and restore_runtime_state.get("cuda_rng_state") is not None:
+                        torch.cuda.set_rng_state_all(restore_runtime_state["cuda_rng_state"])
+                    scaler_state = restore_runtime_state.get("scaler_state")
+                    if (
+                        scaler_state is not None
+                        and self.accelerator.scaler is not None
+                        and hasattr(self.accelerator.scaler, "load_state_dict")
+                    ):
+                        self.accelerator.scaler.load_state_dict(scaler_state)
+                    restore_runtime_state = None
+
                 with self.accelerator.accumulate(self.model):
                     text_inputs = batch["text"]
                     mel_spec = batch["mel"].permute(0, 2, 1)
@@ -477,6 +550,11 @@ class Trainer:
                     progress_bar.update(1)
                     progress_bar.set_postfix(update=str(global_update), loss=loss.item())
 
+                self._batches_consumed_in_epoch += 1
+                if self._batches_consumed_in_epoch >= len(train_dataloader):
+                    self._data_epoch = epoch + 1
+                    self._batches_consumed_in_epoch = 0
+
                 if self.accelerator.is_local_main_process:
                     self.accelerator.log(
                         {"loss": loss.item(), "lr": self.scheduler.get_last_lr()[0]}, step=global_update
@@ -485,13 +563,10 @@ class Trainer:
                     self.writer.add_scalar("loss", loss.item(), global_update)
                     self.writer.add_scalar("lr", self.scheduler.get_last_lr()[0], global_update)
 
-                if global_update % self.last_per_updates == 0 and self.accelerator.sync_gradients:
-                    self.save_checkpoint(global_update, last=True)
-
-                if global_update % self.save_per_updates == 0 and self.accelerator.sync_gradients:
-                    self.save_checkpoint(global_update)
-
-                    if self.log_samples and self.accelerator.is_local_main_process:
+                save_last = global_update % self.last_per_updates == 0
+                save_numbered = global_update % self.save_per_updates == 0
+                if (save_last or save_numbered) and self.accelerator.sync_gradients:
+                    if save_numbered and self.log_samples and self.accelerator.is_local_main_process:
                         ref_audio_len = mel_lengths[0]
                         infer_text = [
                             text_inputs[0] + ([" "] if isinstance(text_inputs[0], list) else " ") + text_inputs[0]
@@ -522,6 +597,11 @@ class Trainer:
                             f"{log_samples_path}/update_{global_update}_ref.wav", ref_audio, target_sample_rate
                         )
                         self.model.train()
+
+                    self.save_checkpoint(global_update, last=save_last)
+
+            self._data_epoch = epoch + 1
+            self._batches_consumed_in_epoch = 0
 
         self.save_checkpoint(global_update, last=True)
 

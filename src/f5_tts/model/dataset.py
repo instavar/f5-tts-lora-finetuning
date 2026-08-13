@@ -237,6 +237,26 @@ class DynamicBatchSampler(Sampler[list[int]]):
         return len(self.batches)
 
 
+class EpochRandomSampler(Sampler[int]):
+    """Random sampler whose order is a pure function of seed and epoch."""
+
+    def __init__(self, data_source: Dataset, random_seed: int):
+        self.data_source = data_source
+        self.random_seed = int(random_seed)
+        self.epoch = 0
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = int(epoch)
+
+    def __iter__(self):
+        generator = torch.Generator()
+        generator.manual_seed(self.random_seed + self.epoch)
+        return iter(torch.randperm(len(self.data_source), generator=generator).tolist())
+
+    def __len__(self):
+        return len(self.data_source)
+
+
 # Load dataset
 
 
