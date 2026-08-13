@@ -100,11 +100,7 @@ def _locked_persistent_package_root(preflight: dict[str, Any]) -> Path:
     recorded_device = preflight.get("persistence_probe", {}).get("device")
     recorded_inode = preflight.get("persistence_probe", {}).get("inode")
     identity = root.stat()
-    if (
-        recorded_root != str(root)
-        or recorded_device != identity.st_dev
-        or recorded_inode != identity.st_ino
-    ):
+    if recorded_root != str(root) or recorded_device != identity.st_dev or recorded_inode != identity.st_ino:
         raise ValueError("PERSISTED_PACKAGE_ROOT changed after preflight")
     return root
 
