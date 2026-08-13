@@ -3,7 +3,7 @@
   "repository": {
     "slug": "instavar/f5-tts-lora-finetuning",
     "url": "https://github.com/instavar/f5-tts-lora-finetuning",
-    "evidence_revision": "fe59e686b8ceb0e6b556c6c3737e2253ce5da247"
+    "evidence_revision": "01fd17f3b963e7b75d43ae3036a670b5f98c3fc8"
   },
   "model": {
     "family": "F5-TTS",
@@ -81,9 +81,14 @@
               "level": "smoke_tested",
               "ref": "reports/runtime-smoke-2026-08-12.md",
               "claim": "Runtime coverage and bounded objective checks were recorded."
+            },
+            {
+              "level": "smoke_tested",
+              "ref": "reports/matched-long-form-base-adapter-2026-08-13.md",
+              "claim": "One exact 68.47-second base-versus-adapter pair completed required objective metrics, non-directional prosody comparison, and focused blind-pack generation."
             }
           ],
-          "boundary": "No exact base-model matrix or complete blind review is recorded."
+          "boundary": "The exact base-model comparison covers one prompt and seed. No blind ratings, multi-seed long-form matrix, or quality winner is recorded."
         },
         "packaging": {
           "status": "repository_declared",

@@ -509,3 +509,8 @@ automatically. Run them explicitly after generation with trusted, content-addres
 models, frozen decoding, and a preregistered reference plan where applicable.
 Runtime-bound observations, same-recording smoke scores, or human-recording ASR
 alone are not TTS-quality evidence.
+
+The first exact base-versus-adapter long-form slice is recorded in
+[`reports/matched-long-form-base-adapter-2026-08-13.md`](reports/matched-long-form-base-adapter-2026-08-13.md).
+It binds one 68.47-second prompt and seed through complete objective, prosody,
+and blind-pack evidence. It records no quality winner and no human ratings.
