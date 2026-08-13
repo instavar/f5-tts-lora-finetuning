@@ -11,12 +11,24 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import wave
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).parents[1]
 UPSTREAM_BASE_REVISION = "82fc4fe622fe36047d1dff99b550e6018181ea11"
+PACKAGE_SCHEMA_VERSION = "1.1.0"
+SUPPORTED_MODELS = {"E2TTS_Base", "F5TTS_Base", "F5TTS_v1_Base"}
+PACKAGE_MEMBER_NAMES = {
+    "dataset-lineage.json",
+    "evaluation-bundle.tar",
+    "experiment-manifest.json",
+    "generation-plan.json",
+    "preflight.json",
+    "selected-adapter.tar",
+    "smoke-candidate.wav",
+}
 
 
 def _path(name: str, *, directory: bool = False) -> Path:
@@ -115,6 +127,32 @@ def _sha256(path: Path) -> str:
     with path.open("rb") as source:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _text_sha256(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _tree_sha256(root: Path) -> str:
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError(f"tree root is missing or unsafe: {root}")
+    digest = hashlib.sha256()
+    count = 0
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink():
+            raise ValueError(f"tree contains a symlink: {path}")
+        if path.is_file():
+            relative = path.relative_to(root).as_posix().encode("utf-8")
+            digest.update(len(relative).to_bytes(8, "big"))
+            digest.update(relative)
+            digest.update(path.stat().st_size.to_bytes(8, "big"))
+            digest.update(bytes.fromhex(_sha256(path)))
+            count += 1
+        elif not path.is_dir():
+            raise ValueError(f"tree contains an unsupported entry: {path}")
+    if count == 0:
+        raise ValueError("tree contains no files")
     return digest.hexdigest()
 
 
@@ -276,6 +314,236 @@ def _extract(source: Path, destination: Path) -> Path:
     return adapter
 
 
+def _extract_package(source: Path, destination: Path) -> Path:
+    destination.mkdir(parents=True, exist_ok=False)
+    with tarfile.open(source, "r") as archive:
+        members = archive.getmembers()
+        if not members:
+            raise ValueError("lifecycle package is empty")
+        seen: set[tuple[str, ...]] = set()
+        for member in members:
+            parts = PurePosixPath(member.name).parts
+            target = (destination / member.name).resolve()
+            is_root_directory = member.isdir() and parts == ("package",)
+            is_bound_file = (
+                member.isfile() and len(parts) == 2 and parts[1] in PACKAGE_MEMBER_NAMES | {"package-manifest.json"}
+            )
+            if (
+                not parts
+                or parts[0] != "package"
+                or ".." in parts
+                or not target.is_relative_to(destination.resolve())
+                or member.issym()
+                or member.islnk()
+                or not (is_root_directory or is_bound_file)
+                or parts in seen
+            ):
+                raise ValueError(f"unsafe lifecycle package member: {member.name}")
+            seen.add(parts)
+        archive.extractall(destination, members=members, filter="data")
+    package = destination / "package"
+    if package.is_symlink() or not package.is_dir():
+        raise ValueError("lifecycle archive did not contain a safe package root")
+    return package
+
+
+def _manifest_file_map(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    rows = manifest.get("files")
+    if not isinstance(rows, list):
+        raise ValueError("package manifest files must be a list")
+    result: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("package manifest contains an invalid file row")
+        name = row.get("path")
+        if not isinstance(name, str) or Path(name).name != name or name in result:
+            raise ValueError("package manifest contains an unsafe or duplicate file path")
+        sha256 = row.get("sha256")
+        size = row.get("bytes")
+        if (
+            not isinstance(sha256, str)
+            or len(sha256) != 64
+            or any(character not in "0123456789abcdef" for character in sha256)
+            or type(size) is not int
+            or size < 1
+        ):
+            raise ValueError(f"package manifest contains an invalid identity for {name}")
+        result[name] = row
+    if set(result) != PACKAGE_MEMBER_NAMES:
+        raise ValueError("package manifest does not bind the exact required file set")
+    return result
+
+
+def _external_file_identity(path: Path) -> dict[str, Any]:
+    if path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
+        raise ValueError(f"external dependency is missing, empty, or unsafe: {path}")
+    return {"sha256": _sha256(path), "bytes": path.stat().st_size}
+
+
+def _verify_external_identity(path: Path, expected: Any, label: str) -> None:
+    if not isinstance(expected, dict) or _external_file_identity(path) != expected:
+        raise ValueError(f"{label} does not match the lifecycle package")
+
+
+def _verify_package_contents(package: Path, *, base_checkpoint: Path, vocab_file: Path | None) -> dict[str, Any]:
+    manifest_path = package / "package-manifest.json"
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise ValueError("lifecycle package has no safe package-manifest.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("schema_version") != PACKAGE_SCHEMA_VERSION:
+        raise ValueError("unsupported lifecycle package schema")
+    if manifest.get("backend_id") != "f5-tts-lora-pytorch":
+        raise ValueError("lifecycle package backend does not match F5-TTS LoRA")
+    files = _manifest_file_map(manifest)
+    actual_files = {
+        path.relative_to(package).as_posix() for path in package.rglob("*") if path.is_file() and path != manifest_path
+    }
+    if actual_files != set(files):
+        raise ValueError("lifecycle package contains unbound or missing files")
+    for name, identity in files.items():
+        path = package / name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"lifecycle package member is missing or unsafe: {name}")
+        if path.stat().st_size != identity["bytes"] or _sha256(path) != identity["sha256"]:
+            raise ValueError(f"lifecycle package member drift detected: {name}")
+    dependencies = manifest.get("external_dependencies")
+    if not isinstance(dependencies, dict) or set(dependencies) != {"base_checkpoint", "vocabulary"}:
+        raise ValueError("lifecycle package has an invalid external dependency contract")
+    _verify_external_identity(base_checkpoint, dependencies["base_checkpoint"], "base checkpoint")
+    expected_vocab = dependencies["vocabulary"]
+    if expected_vocab is None:
+        if vocab_file is not None:
+            raise ValueError("a vocabulary file was supplied but the lifecycle package declares none")
+    else:
+        if vocab_file is None:
+            raise ValueError("the lifecycle package requires an external vocabulary file")
+        _verify_external_identity(vocab_file, expected_vocab, "vocabulary file")
+    model = manifest.get("model")
+    revision = manifest.get("companion_revision")
+    if (
+        model not in SUPPORTED_MODELS
+        or not isinstance(revision, str)
+        or len(revision) != 40
+        or any(character not in "0123456789abcdef" for character in revision)
+    ):
+        raise ValueError("lifecycle package has invalid model or companion revision provenance")
+    return manifest
+
+
+def _probe_wav(path: Path) -> dict[str, Any]:
+    if path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
+        raise ValueError("restored inference did not produce a safe non-empty WAV")
+    try:
+        with wave.open(str(path), "rb") as audio:
+            frames = audio.getnframes()
+            sample_rate = audio.getframerate()
+            channels = audio.getnchannels()
+            sample_width = audio.getsampwidth()
+    except (EOFError, wave.Error) as error:
+        raise ValueError(f"restored inference produced an invalid WAV: {error}") from error
+    if frames < 1 or sample_rate < 1 or channels < 1 or sample_width < 1:
+        raise ValueError("restored inference produced an empty or invalid WAV")
+    return {
+        "sha256": _sha256(path),
+        "bytes": path.stat().st_size,
+        "frames": frames,
+        "sample_rate_hz": sample_rate,
+        "channels": channels,
+        "sample_width_bytes": sample_width,
+    }
+
+
+def _restore() -> None:
+    source = _path("PERSISTED_PACKAGE_PATH")
+    expected_sha256 = os.environ.get("EXPECTED_PACKAGE_SHA256", "").strip()
+    if (
+        len(expected_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in expected_sha256)
+        or _sha256(source) != expected_sha256
+    ):
+        raise ValueError("persisted lifecycle package does not match EXPECTED_PACKAGE_SHA256")
+    base_checkpoint = _path("BASE_MODEL_CHECKPOINT")
+    vocab_file = _path("VOCAB_FILE") if os.environ.get("VOCAB_FILE", "").strip() else None
+    reference_audio = _path("REFERENCE_AUDIO")
+    reference_text = os.environ.get("REFERENCE_TEXT", "")
+    if not reference_text:
+        raise ValueError("REFERENCE_TEXT is required")
+    destination_value = os.environ.get("RESTORE_OUTPUT_DIR", "").strip()
+    if not destination_value:
+        raise ValueError("RESTORE_OUTPUT_DIR is required")
+    destination = Path(destination_value).expanduser()
+    if not destination.is_absolute() or not destination.name:
+        raise ValueError("RESTORE_OUTPUT_DIR must be an absolute child path")
+    if destination.is_symlink() or destination.exists():
+        raise ValueError("RESTORE_OUTPUT_DIR must not already exist")
+    raw_parent = destination.parent
+    if raw_parent.is_symlink():
+        raise ValueError("RESTORE_OUTPUT_DIR parent is missing or unsafe")
+    parent = raw_parent.resolve(strict=True)
+    if not parent.is_dir():
+        raise ValueError("RESTORE_OUTPUT_DIR parent is missing or unsafe")
+    destination = parent / destination.name
+    staging = Path(tempfile.mkdtemp(dir=parent, prefix=f".{destination.name}.partial."))
+    try:
+        package = _extract_package(source, staging / "archive")
+        manifest = _verify_package_contents(
+            package,
+            base_checkpoint=base_checkpoint,
+            vocab_file=vocab_file,
+        )
+        adapter = _extract(package / "selected-adapter.tar", staging / "restored-adapter")
+        output = staging / "restored-smoke.wav"
+        command = [
+            sys.executable,
+            "-m",
+            "f5_tts.infer.infer_cli",
+            "--model",
+            manifest["model"],
+            "--ckpt_file",
+            str(base_checkpoint),
+            "--lora_path",
+            str(adapter),
+            "--ref_audio",
+            str(reference_audio),
+            "--ref_text",
+            reference_text,
+            "--gen_text",
+            os.environ.get("SMOKE_TEXT", "A restored adapter produces this held-out verification sentence."),
+            "--output_dir",
+            str(staging),
+            "--output_file",
+            output.name,
+        ]
+        if vocab_file is not None:
+            command.extend(["--vocab_file", str(vocab_file)])
+        _run(command)
+        wav = _probe_wav(output)
+        _write_json(
+            staging / "restore-receipt.json",
+            {
+                "schema_version": "1.0.0",
+                "status": "passed",
+                "backend_id": manifest["backend_id"],
+                "model": manifest["model"],
+                "package_sha256": expected_sha256,
+                "package_manifest_sha256": _sha256(package / "package-manifest.json"),
+                "base_checkpoint": _external_file_identity(base_checkpoint),
+                "vocabulary": _external_file_identity(vocab_file) if vocab_file is not None else None,
+                "adapter_tree_sha256": _tree_sha256(adapter),
+                "reference_audio": _external_file_identity(reference_audio),
+                "reference_text_sha256": _text_sha256(reference_text),
+                "smoke_text_sha256": _text_sha256(command[command.index("--gen_text") + 1]),
+                "restored_wav": wav,
+                "evidence_boundary": "This receipt proves package verification and a fresh-process PyTorch smoke on the declared host inputs. It does not prove remote backup, cross-runtime equivalence, perceptual quality, distribution rights, or production readiness.",
+            },
+        )
+        os.replace(staging, destination)
+        _fsync_directory(parent)
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+
 def _preflight() -> None:
     from instavar_voice_lab.corpus import audit_corpus
 
@@ -297,6 +565,10 @@ def _preflight() -> None:
     if audit["status"] != "passed":
         raise ValueError("corpus audit failed: " + "; ".join(audit["errors"]))
     base = _path("BASE_MODEL_CHECKPOINT")
+    model = os.environ.get("MODEL", "F5TTS_v1_Base")
+    if model not in SUPPORTED_MODELS:
+        raise ValueError("MODEL is not supported by the F5-TTS lifecycle")
+    vocab_file = _path("VOCAB_FILE") if os.environ.get("VOCAB_FILE", "").strip() else None
     persistent_package_root = _persistent_package_root()
     persistence_probe = _probe_persistent_package_root(persistent_package_root)
     _path("REFERENCE_AUDIO")
@@ -308,12 +580,14 @@ def _preflight() -> None:
     _write_json(
         _work() / "preflight" / "preflight.json",
         {
-            "schema_version": "1.0.0",
+            "schema_version": "1.1.0",
             "status": "passed",
             "companion_revision": revision,
             "upstream_base_revision": UPSTREAM_BASE_REVISION,
+            "model": model,
             "base_checkpoint_sha256": _sha256(base),
             "base_checkpoint_bytes": base.stat().st_size,
+            "vocabulary": _external_file_identity(vocab_file) if vocab_file is not None else None,
             "persistent_package_root": str(persistent_package_root),
             "persistence_probe": persistence_probe,
             "corpus_audit": audit,
@@ -474,6 +748,23 @@ def _evaluate() -> None:
 def _package() -> None:
     work = _work()
     preflight = json.loads((work / "preflight" / "preflight.json").read_text(encoding="utf-8"))
+    if preflight.get("schema_version") != "1.1.0" or preflight.get("status") != "passed":
+        raise ValueError("package requires a passed schema 1.1 preflight")
+    revision = _git_head()
+    if preflight.get("companion_revision") != revision:
+        raise ValueError("companion revision changed after preflight")
+    model = preflight.get("model")
+    if model not in SUPPORTED_MODELS:
+        raise ValueError("preflight contains an unsupported F5-TTS model")
+    vocab_file = _path("VOCAB_FILE") if os.environ.get("VOCAB_FILE", "").strip() else None
+    expected_vocab = preflight.get("vocabulary")
+    if expected_vocab is None:
+        if vocab_file is not None:
+            raise ValueError("VOCAB_FILE was supplied after a no-vocabulary preflight")
+    else:
+        if vocab_file is None:
+            raise ValueError("the preflight requires VOCAB_FILE")
+        _verify_external_identity(vocab_file, expected_vocab, "vocabulary file")
     staging = work / "package" / "staging"
     staging.mkdir(parents=True, exist_ok=False)
     sources = {
@@ -497,11 +788,16 @@ def _package() -> None:
     _write_json(
         staging / "package-manifest.json",
         {
-            "schema_version": "1.0.0",
+            "schema_version": PACKAGE_SCHEMA_VERSION,
             "backend_id": "f5-tts-lora-pytorch",
-            "external_base_checkpoint": {
-                "sha256": preflight["base_checkpoint_sha256"],
-                "bytes": preflight["base_checkpoint_bytes"],
+            "model": model,
+            "companion_revision": revision,
+            "external_dependencies": {
+                "base_checkpoint": {
+                    "sha256": preflight["base_checkpoint_sha256"],
+                    "bytes": preflight["base_checkpoint_bytes"],
+                },
+                "vocabulary": expected_vocab,
             },
             "files": files,
             "evidence_boundary": "The adapter and evidence completed the lifecycle; the base checkpoint, perceptual quality, and distribution rights remain separate dependencies and gates.",
@@ -514,15 +810,23 @@ def _package() -> None:
 
 
 def run(stage: str) -> None:
-    actions = {"preflight": _preflight, "train": _train, "infer": _infer, "evaluate": _evaluate, "package": _package}
+    actions = {
+        "preflight": _preflight,
+        "train": _train,
+        "infer": _infer,
+        "evaluate": _evaluate,
+        "package": _package,
+        "restore": _restore,
+    }
     if stage not in actions:
         raise ValueError(f"unknown lifecycle stage: {stage}")
+    stage_result_value = os.environ.get("INSTAVAR_VOICE_STAGE_RESULT", "").strip()
+    if not stage_result_value:
+        raise ValueError("INSTAVAR_VOICE_STAGE_RESULT is required")
     actions[stage]()
     if stage in {"preflight", "train"}:
         _verify_dataset_lineage()
-    _write_json(
-        Path(os.environ["INSTAVAR_VOICE_STAGE_RESULT"]), {"schema_version": "1.0.0", "stage": stage, "status": "passed"}
-    )
+    _write_json(Path(stage_result_value), {"schema_version": "1.0.0", "stage": stage, "status": "passed"})
 
 
 def main(argv: list[str] | None = None) -> int:

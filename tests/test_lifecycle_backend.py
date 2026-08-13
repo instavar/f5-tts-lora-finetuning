@@ -7,6 +7,7 @@ import os
 import tarfile
 import tempfile
 import unittest
+import wave
 from pathlib import Path
 from unittest.mock import patch
 
@@ -21,6 +22,60 @@ SPEC.loader.exec_module(LIFECYCLE)
 
 
 class LifecycleBackendTests(unittest.TestCase):
+    def _write_wav(self, path: Path) -> None:
+        with wave.open(str(path), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(24000)
+            audio.writeframes(b"\x00\x00" * 240)
+
+    def _build_package(
+        self,
+        root: Path,
+        *,
+        base: Path,
+        vocabulary: Path | None = None,
+        add_unbound_file: bool = False,
+        corrupt_adapter: bool = False,
+    ) -> Path:
+        package = root / "package-source"
+        package.mkdir()
+        adapter = root / "adapter-source"
+        adapter.mkdir()
+        (adapter / "adapter_config.json").write_text("{}\n", encoding="utf-8")
+        (adapter / "adapter_model.safetensors").write_bytes(b"adapter")
+        if corrupt_adapter:
+            (package / "selected-adapter.tar").write_bytes(b"not a tar")
+        else:
+            LIFECYCLE._archive(adapter, package / "selected-adapter.tar", arcname="adapter")
+        for name in LIFECYCLE.PACKAGE_MEMBER_NAMES - {"selected-adapter.tar"}:
+            (package / name).write_bytes(f"fixture:{name}\n".encode())
+        if add_unbound_file:
+            (package / "unbound.txt").write_text("not in manifest\n", encoding="utf-8")
+        files = [
+            {"path": path.name, "sha256": LIFECYCLE._sha256(path), "bytes": path.stat().st_size}
+            for path in sorted(package.iterdir())
+            if path.name in LIFECYCLE.PACKAGE_MEMBER_NAMES
+        ]
+        LIFECYCLE._write_json(
+            package / "package-manifest.json",
+            {
+                "schema_version": LIFECYCLE.PACKAGE_SCHEMA_VERSION,
+                "backend_id": "f5-tts-lora-pytorch",
+                "model": "F5TTS_v1_Base",
+                "companion_revision": "a" * 40,
+                "external_dependencies": {
+                    "base_checkpoint": LIFECYCLE._external_file_identity(base),
+                    "vocabulary": LIFECYCLE._external_file_identity(vocabulary) if vocabulary else None,
+                },
+                "files": files,
+                "evidence_boundary": "fixture",
+            },
+        )
+        archive = root / "package.tar"
+        LIFECYCLE._archive(package, archive, arcname="package")
+        return archive
+
     def test_backend_routes_all_stages_and_binds_lora(self) -> None:
         spec = json.loads((ROOT / "instavar-voice-backend.json").read_text())
         self.assertEqual(spec["schema_version"], "1.2.0")
@@ -30,6 +85,15 @@ class LifecycleBackendTests(unittest.TestCase):
         self.assertIn("package/persisted-package.json", spec["expected_artifacts"]["package"])
         for stage in ("preflight", "train", "infer", "evaluate", "package"):
             self.assertEqual(spec["commands"][stage][-1], stage)
+
+    def test_stage_result_is_required_before_restore_mutates_state(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(LIFECYCLE, "_restore") as restore,
+            self.assertRaisesRegex(ValueError, "INSTAVAR_VOICE_STAGE_RESULT"),
+        ):
+            LIFECYCLE.run("restore")
+        restore.assert_not_called()
 
     def test_selected_adapter_is_one_safe_child(self) -> None:
         self.assertEqual(LIFECYCLE._safe_name("lora_1250"), "lora_1250")
@@ -95,6 +159,224 @@ class LifecycleBackendTests(unittest.TestCase):
                     self.assertRaisesRegex(ValueError, "unsafe adapter archive member"),
                 ):
                     LIFECYCLE._extract(source, root / f"{name}-output")
+
+    def test_package_extract_rejects_traversal_links_and_duplicate_members(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archives: dict[str, Path] = {}
+            traversal = root / "traversal.tar"
+            with tarfile.open(traversal, "w") as archive:
+                member = tarfile.TarInfo("package/../escape")
+                member.size = 1
+                archive.addfile(member, io.BytesIO(b"x"))
+            archives["traversal"] = traversal
+            linked = root / "linked.tar"
+            with tarfile.open(linked, "w") as archive:
+                member = tarfile.TarInfo("package/link")
+                member.type = tarfile.SYMTYPE
+                member.linkname = "/tmp/target"
+                archive.addfile(member)
+            archives["linked"] = linked
+            duplicate = root / "duplicate.tar"
+            with tarfile.open(duplicate, "w") as archive:
+                for payload in (b"first", b"second"):
+                    member = tarfile.TarInfo("package/file")
+                    member.size = len(payload)
+                    archive.addfile(member, io.BytesIO(payload))
+            archives["duplicate"] = duplicate
+            for name, source in archives.items():
+                with (
+                    self.subTest(name=name),
+                    self.assertRaisesRegex(ValueError, "unsafe lifecycle package member"),
+                ):
+                    LIFECYCLE._extract_package(source, root / f"{name}-output")
+
+    def test_restore_verifies_package_and_publishes_only_after_fresh_inference(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = root / "base.safetensors"
+            base.write_bytes(b"base")
+            reference = root / "reference.wav"
+            self._write_wav(reference)
+            package = self._build_package(root, base=base)
+            destination = root / "restored"
+            commands: list[list[str]] = []
+
+            def fake_run(command: list[str], *, capture: bool = False) -> str:
+                commands.append(command)
+                output = Path(command[command.index("--output_dir") + 1]) / command[command.index("--output_file") + 1]
+                self._write_wav(output)
+                return ""
+
+            environment = {
+                "PERSISTED_PACKAGE_PATH": str(package),
+                "EXPECTED_PACKAGE_SHA256": LIFECYCLE._sha256(package),
+                "BASE_MODEL_CHECKPOINT": str(base),
+                "REFERENCE_AUDIO": str(reference),
+                "REFERENCE_TEXT": "Reference transcript.",
+                "RESTORE_OUTPUT_DIR": str(destination),
+            }
+            with (
+                patch.dict(os.environ, environment, clear=False),
+                patch.object(LIFECYCLE, "_run", side_effect=fake_run),
+            ):
+                LIFECYCLE._restore()
+
+            self.assertEqual(len(commands), 1)
+            self.assertTrue((destination / "restored-adapter" / "adapter" / "adapter_model.safetensors").is_file())
+            receipt = json.loads((destination / "restore-receipt.json").read_text(encoding="utf-8"))
+            self.assertEqual(receipt["status"], "passed")
+            self.assertEqual(receipt["package_sha256"], LIFECYCLE._sha256(package))
+            self.assertEqual(receipt["restored_wav"]["sample_rate_hz"], 24000)
+            self.assertFalse(any(path.name.startswith(".restored.partial.") for path in root.iterdir()))
+
+    def test_restore_fails_closed_on_package_base_vocab_and_inference_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = root / "base.safetensors"
+            base.write_bytes(b"base")
+            wrong_base = root / "wrong-base.safetensors"
+            wrong_base.write_bytes(b"wrong")
+            vocabulary = root / "vocab.txt"
+            vocabulary.write_text("token\n", encoding="utf-8")
+            reference = root / "reference.wav"
+            self._write_wav(reference)
+            package = self._build_package(root, base=base, vocabulary=vocabulary)
+            common = {
+                "PERSISTED_PACKAGE_PATH": str(package),
+                "EXPECTED_PACKAGE_SHA256": LIFECYCLE._sha256(package),
+                "BASE_MODEL_CHECKPOINT": str(base),
+                "REFERENCE_AUDIO": str(reference),
+                "REFERENCE_TEXT": "Reference transcript.",
+            }
+            cases = (
+                ({"EXPECTED_PACKAGE_SHA256": "0" * 64, "VOCAB_FILE": str(vocabulary)}, "EXPECTED_PACKAGE_SHA256"),
+                ({"BASE_MODEL_CHECKPOINT": str(wrong_base), "VOCAB_FILE": str(vocabulary)}, "base checkpoint"),
+                ({}, "requires an external vocabulary"),
+            )
+            for index, (override, message) in enumerate(cases):
+                destination = root / f"failed-{index}"
+                environment = {**common, **override, "RESTORE_OUTPUT_DIR": str(destination)}
+                with (
+                    self.subTest(message=message),
+                    patch.dict(os.environ, environment, clear=True),
+                    self.assertRaisesRegex(ValueError, message),
+                ):
+                    LIFECYCLE._restore()
+                self.assertFalse(destination.exists())
+
+            destination = root / "failed-inference"
+            environment = {
+                **common,
+                "VOCAB_FILE": str(vocabulary),
+                "RESTORE_OUTPUT_DIR": str(destination),
+            }
+            with (
+                patch.dict(os.environ, environment, clear=True),
+                patch.object(LIFECYCLE, "_run", side_effect=RuntimeError("inference failed")),
+                self.assertRaisesRegex(RuntimeError, "inference failed"),
+            ):
+                LIFECYCLE._restore()
+            self.assertFalse(destination.exists())
+            self.assertFalse(any(path.name.startswith(".failed-inference.partial.") for path in root.iterdir()))
+
+    def test_restore_rejects_unbound_files_and_corrupt_inner_adapter(self) -> None:
+        for condition in ("unbound", "corrupt-adapter"):
+            with self.subTest(condition=condition), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                base = root / "base.safetensors"
+                base.write_bytes(b"base")
+                reference = root / "reference.wav"
+                self._write_wav(reference)
+                package = self._build_package(
+                    root,
+                    base=base,
+                    add_unbound_file=condition == "unbound",
+                    corrupt_adapter=condition == "corrupt-adapter",
+                )
+                destination = root / "restored"
+                environment = {
+                    "PERSISTED_PACKAGE_PATH": str(package),
+                    "EXPECTED_PACKAGE_SHA256": LIFECYCLE._sha256(package),
+                    "BASE_MODEL_CHECKPOINT": str(base),
+                    "REFERENCE_AUDIO": str(reference),
+                    "REFERENCE_TEXT": "Reference transcript.",
+                    "RESTORE_OUTPUT_DIR": str(destination),
+                }
+                with patch.dict(os.environ, environment, clear=True), self.assertRaises((ValueError, tarfile.TarError)):
+                    LIFECYCLE._restore()
+                self.assertFalse(destination.exists())
+
+    def test_package_manifest_binds_vocabulary_and_round_trips_through_verifier(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            work = root / "work"
+            store = root / "store"
+            for path in (
+                work / "preflight",
+                work / "train",
+                work / "infer",
+                work / "evaluate",
+                store,
+            ):
+                path.mkdir(parents=True)
+            base = root / "base.safetensors"
+            base.write_bytes(b"base")
+            vocabulary = root / "vocab.txt"
+            vocabulary.write_text("token\n", encoding="utf-8")
+            reference = root / "reference.wav"
+            self._write_wav(reference)
+            adapter = root / "adapter"
+            adapter.mkdir()
+            (adapter / "adapter_model.safetensors").write_bytes(b"adapter")
+            LIFECYCLE._archive(adapter, work / "train" / "selected-adapter.tar", arcname="adapter")
+            (work / "evaluate" / "evaluation-bundle.tar").write_bytes(b"evaluation")
+            self._write_wav(work / "infer" / "candidate.wav")
+            identity = store.stat()
+            LIFECYCLE._write_json(
+                work / "preflight" / "preflight.json",
+                {
+                    "schema_version": "1.1.0",
+                    "status": "passed",
+                    "companion_revision": "a" * 40,
+                    "model": "F5TTS_v1_Base",
+                    "base_checkpoint_sha256": LIFECYCLE._sha256(base),
+                    "base_checkpoint_bytes": base.stat().st_size,
+                    "vocabulary": LIFECYCLE._external_file_identity(vocabulary),
+                    "persistent_package_root": str(store.resolve()),
+                    "persistence_probe": {"device": identity.st_dev, "inode": identity.st_ino},
+                },
+            )
+            documents = {}
+            for name in ("experiment", "plan", "lineage"):
+                path = root / f"{name}.json"
+                path.write_text("{}\n", encoding="utf-8")
+                documents[name] = path
+            environment = {
+                "INSTAVAR_VOICE_WORK_DIR": str(work),
+                "PERSISTED_PACKAGE_ROOT": str(store),
+                "INSTAVAR_VOICE_EXPERIMENT_MANIFEST": str(documents["experiment"]),
+                "GENERATION_PLAN": str(documents["plan"]),
+                "DATASET_LINEAGE": str(documents["lineage"]),
+                "VOCAB_FILE": str(vocabulary),
+                "MODEL": "F5TTS_v1_Base",
+            }
+            with (
+                patch.dict(os.environ, environment, clear=False),
+                patch.object(LIFECYCLE, "_git_head", return_value="a" * 40),
+            ):
+                LIFECYCLE._package()
+            package = work / "package" / "adapter-package.tar"
+            unpacked = LIFECYCLE._extract_package(package, root / "unpacked")
+            manifest = LIFECYCLE._verify_package_contents(
+                unpacked,
+                base_checkpoint=base,
+                vocab_file=vocabulary,
+            )
+            self.assertEqual(manifest["schema_version"], "1.1.0")
+            self.assertEqual(manifest["external_dependencies"]["vocabulary"]["sha256"], LIFECYCLE._sha256(vocabulary))
+            receipt = json.loads((work / "package" / "persisted-package.json").read_text(encoding="utf-8"))
+            self.assertEqual(receipt["package_sha256"], LIFECYCLE._sha256(package))
 
     def test_persist_package_is_content_addressed_and_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

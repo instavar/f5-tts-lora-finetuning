@@ -364,6 +364,37 @@ that inherited Triton, MLX, or ONNX runtimes reproduce the PyTorch result. The
 retention receipt also does not establish remote backup, restore, distribution
 rights, or the existence of a real promoted package until the lifecycle runs.
 
+#### Fail-closed package restore
+
+Package schema 1.1 binds the exact seven packaged files, model identifier,
+companion revision, external base checkpoint, and optional external vocabulary.
+The standalone `restore` action requires an independently supplied outer package
+SHA-256, rejects archive traversal, links, duplicate members, extra files,
+member drift, and external dependency drift, then extracts the inner adapter and
+runs fresh-process PyTorch inference. The destination appears atomically only
+after a valid WAV and restore receipt exist.
+
+```bash
+PERSISTED_PACKAGE_PATH=/absolute/path/f5-tts-lora-package-sha256-....tar \
+EXPECTED_PACKAGE_SHA256=<sha256-from-an-independent-receipt> \
+BASE_MODEL_CHECKPOINT=/absolute/path/model.safetensors \
+REFERENCE_AUDIO=/absolute/path/authorised-reference.wav \
+REFERENCE_TEXT='Exact transcript for the reference audio.' \
+RESTORE_OUTPUT_DIR=/absolute/path/new-restored-directory \
+INSTAVAR_VOICE_STAGE_RESULT=/absolute/path/restore-stage.json \
+python scripts/instavar_voice_lifecycle.py restore
+```
+
+Set `VOCAB_FILE` when the package declares an external vocabulary. Supplying a
+vocabulary to a package that declares none, or omitting one that is declared,
+fails closed. `RESTORE_OUTPUT_DIR` must be an absent absolute child path under an
+existing non-symbolic parent.
+
+A passed restore receipt establishes archive verification, external dependency
+matching, adapter extraction, and one fresh PyTorch smoke on the declared host
+inputs. It does not establish remote backup durability, cross-runtime
+equivalence, perceptual quality, distribution rights, or production readiness.
+
 ### LoRA CLI Arguments
 
 | Argument | Default | Description |
