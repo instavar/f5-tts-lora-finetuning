@@ -454,8 +454,11 @@ Both frame and sample batching use epoch-addressable ordering. The trainer
 replays the recorded number of batches before restoring post-checkpoint model
 RNG state. Sample-audio logging runs before the checkpoint captures RNG so a
 resumed process does not silently omit randomness consumed by the uninterrupted
-path. These mechanics are contract-tested but have not passed a real
-interrupted-versus-uninterrupted GPU comparison.
+path. A bounded RTX 3090 Ti epoch-boundary drill produced byte-identical final
+adapter, optimizer, scheduler, logical state, and process RNG artifacts after a
+real interruption. See
+[`reports/interrupted-resume-gpu-2026-08-14.md`](reports/interrupted-resume-gpu-2026-08-14.md)
+for the exact scope and exclusions.
 
 ### Target Modules
 
