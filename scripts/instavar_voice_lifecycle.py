@@ -163,6 +163,74 @@ def _safe_name(value: str) -> str:
     return value
 
 
+def _training_config() -> dict[str, str]:
+    return {
+        "batch_size_per_gpu": os.environ.get("BATCH_SIZE_PER_GPU", "3200"),
+        "batch_size_type": os.environ.get("BATCH_SIZE_TYPE", "frame"),
+        "epochs": os.environ.get("EPOCHS", "20"),
+        "last_per_updates": os.environ.get("LAST_PER_UPDATES", "100"),
+        "learning_rate": os.environ.get("LEARNING_RATE", "1e-4"),
+        "lora_alpha": os.environ.get("LORA_ALPHA", "16"),
+        "lora_rank": os.environ.get("LORA_RANK", "16"),
+        "num_warmup_updates": os.environ.get("NUM_WARMUP_UPDATES", "200"),
+        "save_per_updates": os.environ.get("SAVE_PER_UPDATES", "500"),
+    }
+
+
+def _bound_lifecycle_inputs() -> dict[str, Any]:
+    model = os.environ.get("MODEL", "F5TTS_v1_Base")
+    if model not in SUPPORTED_MODELS:
+        raise ValueError("MODEL is not supported by the F5-TTS lifecycle")
+    reference_text = os.environ.get("REFERENCE_TEXT", "")
+    if not reference_text:
+        raise ValueError("REFERENCE_TEXT is required")
+    smoke_text = os.environ.get("SMOKE_TEXT", "A held-out sentence verifies adapter reload.")
+    if not smoke_text:
+        raise ValueError("SMOKE_TEXT must not be empty")
+    candidate_id = os.environ.get("CANDIDATE_ID", "").strip()
+    dataset_name = os.environ.get("DATASET_NAME", "").strip()
+    if not candidate_id or not dataset_name:
+        raise ValueError("CANDIDATE_ID and DATASET_NAME are required")
+    vocab_file = _path("VOCAB_FILE") if os.environ.get("VOCAB_FILE", "").strip() else None
+    return {
+        "files": {
+            "base_checkpoint": _external_file_identity(_path("BASE_MODEL_CHECKPOINT")),
+            "dataset_lineage": _external_file_identity(_path("DATASET_LINEAGE")),
+            "experiment_manifest": _external_file_identity(_path("INSTAVAR_VOICE_EXPERIMENT_MANIFEST")),
+            "generation_plan": _external_file_identity(_path("GENERATION_PLAN")),
+            "raw_test": _external_file_identity(_path("RAW_TEST_JSONL")),
+            "raw_train": _external_file_identity(_path("RAW_TRAIN_JSONL")),
+            "raw_validation": _external_file_identity(_path("RAW_VALIDATION_JSONL")),
+            "reference_audio": _external_file_identity(_path("REFERENCE_AUDIO")),
+            "vocabulary": _external_file_identity(vocab_file) if vocab_file is not None else None,
+        },
+        "values": {
+            "candidate_id": candidate_id,
+            "corpus_group_field": os.environ.get("CORPUS_GROUP_FIELD", ""),
+            "dataset_name": dataset_name,
+            "model": model,
+            "reference_text_sha256": _text_sha256(reference_text),
+            "selected_adapter_name": _safe_name(os.environ.get("SELECTED_ADAPTER_NAME", "")),
+            "smoke_text_sha256": _text_sha256(smoke_text),
+            "training_config": _training_config(),
+        },
+    }
+
+
+def _verified_preflight() -> dict[str, Any]:
+    path = _work() / "preflight" / "preflight.json"
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("lifecycle has no safe preflight receipt")
+    preflight = json.loads(path.read_text(encoding="utf-8"))
+    if preflight.get("schema_version") != "1.2.0" or preflight.get("status") != "passed":
+        raise ValueError("lifecycle requires a passed schema 1.2 preflight")
+    if preflight.get("companion_revision") != _git_head():
+        raise ValueError("companion revision changed after preflight")
+    if preflight.get("bound_inputs") != _bound_lifecycle_inputs():
+        raise ValueError("lifecycle inputs or controls changed after preflight")
+    return preflight
+
+
 def _run(command: list[str], *, capture: bool = False) -> str:
     result = subprocess.run(command, cwd=REPO_ROOT, capture_output=capture, text=capture, check=False)
     if result.returncode != 0:
@@ -565,10 +633,7 @@ def _preflight() -> None:
     if audit["status"] != "passed":
         raise ValueError("corpus audit failed: " + "; ".join(audit["errors"]))
     base = _path("BASE_MODEL_CHECKPOINT")
-    model = os.environ.get("MODEL", "F5TTS_v1_Base")
-    if model not in SUPPORTED_MODELS:
-        raise ValueError("MODEL is not supported by the F5-TTS lifecycle")
-    vocab_file = _path("VOCAB_FILE") if os.environ.get("VOCAB_FILE", "").strip() else None
+    bound_inputs = _bound_lifecycle_inputs()
     persistent_package_root = _persistent_package_root()
     persistence_probe = _probe_persistent_package_root(persistent_package_root)
     _path("REFERENCE_AUDIO")
@@ -580,14 +645,15 @@ def _preflight() -> None:
     _write_json(
         _work() / "preflight" / "preflight.json",
         {
-            "schema_version": "1.1.0",
+            "schema_version": "1.2.0",
             "status": "passed",
             "companion_revision": revision,
             "upstream_base_revision": UPSTREAM_BASE_REVISION,
-            "model": model,
+            "model": bound_inputs["values"]["model"],
             "base_checkpoint_sha256": _sha256(base),
             "base_checkpoint_bytes": base.stat().st_size,
-            "vocabulary": _external_file_identity(vocab_file) if vocab_file is not None else None,
+            "vocabulary": bound_inputs["files"]["vocabulary"],
+            "bound_inputs": bound_inputs,
             "persistent_package_root": str(persistent_package_root),
             "persistence_probe": persistence_probe,
             "corpus_audit": audit,
@@ -598,6 +664,7 @@ def _preflight() -> None:
 
 
 def _train() -> None:
+    _verified_preflight()
     _verify_dataset_lineage()
     work = _work()
     output = work / "train" / "output"
@@ -614,23 +681,23 @@ def _train() -> None:
         os.environ["BASE_MODEL_CHECKPOINT"],
         "--lora",
         "--lora_rank",
-        os.environ.get("LORA_RANK", "16"),
+        _training_config()["lora_rank"],
         "--lora_alpha",
-        os.environ.get("LORA_ALPHA", "16"),
+        _training_config()["lora_alpha"],
         "--learning_rate",
-        os.environ.get("LEARNING_RATE", "1e-4"),
+        _training_config()["learning_rate"],
         "--epochs",
-        os.environ.get("EPOCHS", "20"),
+        _training_config()["epochs"],
         "--num_warmup_updates",
-        os.environ.get("NUM_WARMUP_UPDATES", "200"),
+        _training_config()["num_warmup_updates"],
         "--save_per_updates",
-        os.environ.get("SAVE_PER_UPDATES", "500"),
+        _training_config()["save_per_updates"],
         "--last_per_updates",
-        os.environ.get("LAST_PER_UPDATES", "100"),
+        _training_config()["last_per_updates"],
         "--batch_size_per_gpu",
-        os.environ.get("BATCH_SIZE_PER_GPU", "3200"),
+        _training_config()["batch_size_per_gpu"],
         "--batch_size_type",
-        os.environ.get("BATCH_SIZE_TYPE", "frame"),
+        _training_config()["batch_size_type"],
         "--checkpoint_path",
         str(output),
     ]
@@ -643,6 +710,7 @@ def _train() -> None:
 
 
 def _infer() -> None:
+    _verified_preflight()
     work = _work()
     adapter = _extract(work / "train" / "selected-adapter.tar", work / "infer" / "reload")
     output = work / "infer" / "candidate.wav"
@@ -675,6 +743,7 @@ def _infer() -> None:
 
 
 def _evaluate() -> None:
+    _verified_preflight()
     work = _work()
     adapter = _extract(work / "train" / "selected-adapter.tar", work / "evaluate" / "reload")
     output = work / "evaluate" / "output"
@@ -747,12 +816,8 @@ def _evaluate() -> None:
 
 def _package() -> None:
     work = _work()
-    preflight = json.loads((work / "preflight" / "preflight.json").read_text(encoding="utf-8"))
-    if preflight.get("schema_version") != "1.1.0" or preflight.get("status") != "passed":
-        raise ValueError("package requires a passed schema 1.1 preflight")
-    revision = _git_head()
-    if preflight.get("companion_revision") != revision:
-        raise ValueError("companion revision changed after preflight")
+    preflight = _verified_preflight()
+    revision = preflight["companion_revision"]
     model = preflight.get("model")
     if model not in SUPPORTED_MODELS:
         raise ValueError("preflight contains an unsupported F5-TTS model")

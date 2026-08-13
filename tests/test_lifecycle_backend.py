@@ -95,6 +95,63 @@ class LifecycleBackendTests(unittest.TestCase):
             LIFECYCLE.run("restore")
         restore.assert_not_called()
 
+    def test_preflight_binding_rejects_file_and_training_control_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            work = root / "work"
+            (work / "preflight").mkdir(parents=True)
+            paths = {}
+            for name in (
+                "base",
+                "lineage",
+                "experiment",
+                "plan",
+                "train",
+                "validation",
+                "test",
+                "reference",
+            ):
+                path = root / name
+                path.write_bytes(f"{name}\n".encode())
+                paths[name] = path
+            environment = {
+                "INSTAVAR_VOICE_WORK_DIR": str(work),
+                "BASE_MODEL_CHECKPOINT": str(paths["base"]),
+                "DATASET_LINEAGE": str(paths["lineage"]),
+                "INSTAVAR_VOICE_EXPERIMENT_MANIFEST": str(paths["experiment"]),
+                "GENERATION_PLAN": str(paths["plan"]),
+                "RAW_TRAIN_JSONL": str(paths["train"]),
+                "RAW_VALIDATION_JSONL": str(paths["validation"]),
+                "RAW_TEST_JSONL": str(paths["test"]),
+                "REFERENCE_AUDIO": str(paths["reference"]),
+                "REFERENCE_TEXT": "Reference transcript.",
+                "CANDIDATE_ID": "f5-fixture",
+                "DATASET_NAME": "fixture",
+                "SELECTED_ADAPTER_NAME": "lora_1",
+            }
+            with (
+                patch.dict(os.environ, environment, clear=True),
+                patch.object(LIFECYCLE, "_git_head", return_value="a" * 40),
+            ):
+                bound = LIFECYCLE._bound_lifecycle_inputs()
+                LIFECYCLE._write_json(
+                    work / "preflight" / "preflight.json",
+                    {
+                        "schema_version": "1.2.0",
+                        "status": "passed",
+                        "companion_revision": "a" * 40,
+                        "bound_inputs": bound,
+                    },
+                )
+                self.assertEqual(LIFECYCLE._verified_preflight()["bound_inputs"], bound)
+                paths["plan"].write_bytes(b"changed plan\n")
+                with self.assertRaisesRegex(ValueError, "inputs or controls changed"):
+                    LIFECYCLE._verified_preflight()
+                paths["plan"].write_bytes(b"plan\n")
+                os.environ["EPOCHS"] = "21"
+                with self.assertRaisesRegex(ValueError, "inputs or controls changed"):
+                    LIFECYCLE._verified_preflight()
+
     def test_selected_adapter_is_one_safe_child(self) -> None:
         self.assertEqual(LIFECYCLE._safe_name("lora_1250"), "lora_1250")
         for unsafe in ("", ".", "..", "../lora_last", "nested/lora_last", "/lora_last"):
@@ -335,18 +392,19 @@ class LifecycleBackendTests(unittest.TestCase):
             identity = store.stat()
             LIFECYCLE._write_json(
                 work / "preflight" / "preflight.json",
-                {
-                    "schema_version": "1.1.0",
-                    "status": "passed",
-                    "companion_revision": "a" * 40,
-                    "model": "F5TTS_v1_Base",
-                    "base_checkpoint_sha256": LIFECYCLE._sha256(base),
-                    "base_checkpoint_bytes": base.stat().st_size,
-                    "vocabulary": LIFECYCLE._external_file_identity(vocabulary),
-                    "persistent_package_root": str(store.resolve()),
-                    "persistence_probe": {"device": identity.st_dev, "inode": identity.st_ino},
-                },
+                {"fixture": True},
             )
+            preflight = {
+                "schema_version": "1.2.0",
+                "status": "passed",
+                "companion_revision": "a" * 40,
+                "model": "F5TTS_v1_Base",
+                "base_checkpoint_sha256": LIFECYCLE._sha256(base),
+                "base_checkpoint_bytes": base.stat().st_size,
+                "vocabulary": LIFECYCLE._external_file_identity(vocabulary),
+                "persistent_package_root": str(store.resolve()),
+                "persistence_probe": {"device": identity.st_dev, "inode": identity.st_ino},
+            }
             documents = {}
             for name in ("experiment", "plan", "lineage"):
                 path = root / f"{name}.json"
@@ -363,7 +421,7 @@ class LifecycleBackendTests(unittest.TestCase):
             }
             with (
                 patch.dict(os.environ, environment, clear=False),
-                patch.object(LIFECYCLE, "_git_head", return_value="a" * 40),
+                patch.object(LIFECYCLE, "_verified_preflight", return_value=preflight),
             ):
                 LIFECYCLE._package()
             package = work / "package" / "adapter-package.tar"
