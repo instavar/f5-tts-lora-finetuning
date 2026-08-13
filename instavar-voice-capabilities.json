@@ -85,11 +85,11 @@
           "evidence": [
             {
               "level": "repository_declared",
-              "ref": "README.md#lora-fine-tuning-instavar-fork",
-              "claim": "The repository provides adapter save and merge utilities."
+              "ref": "INSTAVAR_VOICE_CONFORMANCE.md",
+              "claim": "The lifecycle publishes a content-addressed LoRA package to a preflight-probed external root and records a receipt."
             }
           ],
-          "boundary": "Utilities do not establish a rights-reviewed immutable promoted package."
+          "boundary": "Dependency-free tests establish retention mechanics only. No real package, remote backup, restore drill, or rights-reviewed release is recorded."
         }
       }
     },
@@ -254,6 +254,7 @@
   "known_gaps": [
     "Separate inherited upstream runtime breadth from Instavar's LoRA-specific contribution in release notes.",
     "Reproduce adapter-merged equivalence in Triton, MLX, or ONNX before promoting those runtimes.",
-    "The 21-row adapter runtime suite still needs human ratings and a base-model comparison."
+    "The 21-row adapter runtime suite still needs human ratings and a base-model comparison.",
+    "Run the package stage with a real trained adapter, retain the receipt, and complete remote backup plus restore verification."
   ]
 }

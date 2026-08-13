@@ -324,13 +324,20 @@ unique work directory instead of the repository's shared `ckpts/` tree. The
 wrapper audits grouped splits, selects one exact adapter directory, reloads it
 in a fresh process with the same optional vocabulary file, uses the sequential
 multi-chunk frozen evaluator, and packages the adapter plus preflight, smoke,
-evaluation, experiment, and plan evidence.
+evaluation, experiment, and plan evidence. Set `PERSISTED_PACKAGE_ROOT` to an
+existing directory outside the checkout and lifecycle work directory. Preflight
+probes durable writes and no-overwrite atomic publication; packaging stores the
+archive only if that resolved path and filesystem device still match preflight,
+under a content-addressed name, and writes
+`package/persisted-package.json` as its receipt.
 
 Validate the recipe with evaluator merge
 `8feadf7bbda75abe1c305c63e362c41b86451cda` and use an empty work directory
 outside the checkout. A passed lifecycle establishes execution and artifact
 lineage. It does not establish that the adapted voice is perceptually better or
-that inherited Triton, MLX, or ONNX runtimes reproduce the PyTorch result.
+that inherited Triton, MLX, or ONNX runtimes reproduce the PyTorch result. The
+retention receipt also does not establish remote backup, restore, distribution
+rights, or the existence of a real promoted package until the lifecycle runs.
 
 ### LoRA CLI Arguments
 

@@ -2,11 +2,13 @@
 
 This repository declares its model-specific adaptation and runtime surface in `instavar-voice-capabilities.json`. The manifest and executable [`instavar-voice-backend.json`](instavar-voice-backend.json) LoRA recipe use the public [Instavar Voice evaluation contract](https://github.com/instavar/instavar-voice-evaluation) pinned by CI to commit `8feadf7bbda75abe1c305c63e362c41b86451cda`.
 
-The backend adds an explicit checkpoint-output boundary to the trainer, audits grouped splits, reloads one selected adapter, uses the sequential long-form evaluator, and packages the adapter with experiment and evaluation evidence. CI validates and dependency-tests the recipe without performing GPU training.
+The backend adds an explicit checkpoint-output boundary to the trainer, audits grouped splits, reloads one selected adapter, uses the sequential long-form evaluator, and packages the adapter with experiment and evaluation evidence. The package stage then publishes the archive under a content-addressed name to a preflight-probed external root and records a receipt. CI validates and dependency-tests the recipe without performing GPU training.
 
 Capability schema 1.2 records each LoRA lifecycle stage separately and names the exact blocker for the matched base-model comparison. A repository-level `supported` label no longer implies corpus audit, evaluation, or packaging completeness.
 
 A capability marked `supported` means the referenced repository evidence reaches the stated engineering boundary. It does not prove perceptual quality, accent fidelity, commercial suitability, or equivalence across untested runtimes. `unverified_for_adapter` keeps an upstream or community runtime visible without implying that this repository's adapted artifact works there.
+
+`PERSISTED_PACKAGE_ROOT` must already exist outside both the checkout and lifecycle work directory. Preflight verifies durable writes and no-overwrite atomic hard-link publication, then locks the resolved path and filesystem device for the later package stage. Packaging reuses only a byte-identical object, rejects a conflicting or symbolic destination, and leaves the stage-local archive available for inspection. This establishes repository-declared retention mechanics, not a completed rights review, remote backup, restore drill, or real promoted model package.
 
 The common evaluation pack separates deterministic audio diagnostics and objective proxies from blinded human listening. It intentionally defines no universal composite score.
 
