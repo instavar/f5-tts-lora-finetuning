@@ -11,7 +11,7 @@ from cached_path import cached_path
 
 from f5_tts.model import CFM, DiT, Trainer, UNetT
 from f5_tts.model.dataset import load_dataset
-from f5_tts.model.utils import get_tokenizer
+from f5_tts.model.utils import get_tokenizer, seed_everything
 from f5_tts.train.lora_resume_contract import build_contract, require_fresh_output
 
 
@@ -45,6 +45,12 @@ def parse_args():
     parser.add_argument("--grad_accumulation_steps", type=int, default=1, help="Gradient accumulation steps")
     parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Max gradient norm for clipping")
     parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=666,
+        help="Seed Python, NumPy, Torch, CUDA, and epoch-addressable data order.",
+    )
     parser.add_argument("--num_warmup_updates", type=int, default=20000, help="Warmup updates")
     parser.add_argument("--save_per_updates", type=int, default=50000, help="Save checkpoint every N updates")
     parser.add_argument(
@@ -126,6 +132,9 @@ def main():
         raise ValueError("trust_resume_state requires an explicit resume_from checkpoint")
     if args.lora and not args.finetune:
         raise ValueError("LoRA training requires --finetune so the base checkpoint is explicit and bound")
+    if not 0 <= args.seed <= 2**63 - 1:
+        raise ValueError("seed must be an integer from 0 through 2^63 - 1")
+    seed_everything(args.seed)
 
     # Model parameters based on experiment name
 
@@ -222,6 +231,7 @@ def main():
                 "grad_accumulation_steps": args.grad_accumulation_steps,
                 "max_grad_norm": args.max_grad_norm,
                 "epochs": args.epochs,
+                "seed": args.seed,
                 "num_warmup_updates": args.num_warmup_updates,
                 "save_per_updates": args.save_per_updates,
                 "last_per_updates": args.last_per_updates,
@@ -231,7 +241,7 @@ def main():
                 "lora_alpha": args.lora_alpha,
                 "lora_dropout": args.lora_dropout,
                 "lora_target_modules": args.lora_target_modules,
-                "shuffle_seed": 666,
+                "shuffle_seed": args.seed,
             },
             runtime={
                 "python": platform.python_version(),
@@ -331,7 +341,7 @@ def main():
 
     trainer.train(
         train_dataset,
-        resumable_with_seed=666,  # seed for shuffling dataset
+        resumable_with_seed=args.seed,
     )
 
 

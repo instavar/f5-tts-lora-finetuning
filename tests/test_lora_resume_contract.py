@@ -222,6 +222,14 @@ class LoRATrainerSourceContractTest(unittest.TestCase):
         self.assertIn('"--trust_resume_state"', self.cli)
         self.assertIn("trust_resume_state requires an explicit resume_from", self.cli)
 
+    def test_cli_binds_one_seed_to_process_rng_data_order_and_resume_contract(self):
+        self.assertIn('"--seed"', self.cli)
+        self.assertIn("seed_everything(args.seed)", self.cli)
+        self.assertIn('"seed": args.seed', self.cli)
+        self.assertIn('"shuffle_seed": args.seed', self.cli)
+        self.assertIn("resumable_with_seed=args.seed", self.cli)
+        self.assertLess(self.cli.index("seed_everything(args.seed)"), self.cli.index("model = CFM("))
+
     def test_lora_loader_never_selects_last_or_highest_checkpoint(self):
         lora_start = self.trainer.index("if self.use_lora:", self.trainer.index("def load_checkpoint"))
         standard_start = self.trainer.index("# Standard (non-LoRA) checkpoint loading", lora_start)

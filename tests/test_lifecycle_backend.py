@@ -173,6 +173,10 @@ class LifecycleBackendTests(unittest.TestCase):
                 os.environ["SMOKE_SEED"] = "43"
                 with self.assertRaisesRegex(ValueError, "inputs or controls changed"):
                     LIFECYCLE._verified_preflight()
+                os.environ["SMOKE_SEED"] = "42"
+                os.environ["TRAINING_SEED"] = "667"
+                with self.assertRaisesRegex(ValueError, "inputs or controls changed"):
+                    LIFECYCLE._verified_preflight()
 
     def test_selected_adapter_is_one_safe_child(self) -> None:
         self.assertEqual(LIFECYCLE._safe_name("lora_1250"), "lora_1250")

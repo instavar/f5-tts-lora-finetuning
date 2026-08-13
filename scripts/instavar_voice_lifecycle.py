@@ -188,6 +188,7 @@ def _training_config() -> dict[str, str]:
         "lora_rank": os.environ.get("LORA_RANK", "16"),
         "num_warmup_updates": os.environ.get("NUM_WARMUP_UPDATES", "200"),
         "save_per_updates": os.environ.get("SAVE_PER_UPDATES", "500"),
+        "seed": str(_seed(os.environ.get("TRAINING_SEED", "666"), label="TRAINING_SEED")),
     }
 
 
@@ -779,6 +780,8 @@ def _train() -> None:
         _training_config()["learning_rate"],
         "--epochs",
         _training_config()["epochs"],
+        "--seed",
+        _training_config()["seed"],
         "--num_warmup_updates",
         _training_config()["num_warmup_updates"],
         "--save_per_updates",

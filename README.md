@@ -412,6 +412,7 @@ equivalence, perceptual quality, distribution rights, or production readiness.
 | `--lora_rank` | `16` | LoRA rank (r). Higher = more capacity, more params |
 | `--lora_alpha` | `16` | LoRA alpha. Scaling factor = alpha/rank |
 | `--lora_dropout` | `0.0` | Dropout on LoRA layers (0.0 recommended for small datasets) |
+| `--seed` | `666` | Seed Python, NumPy, Torch, CUDA, epoch-addressable data order, and the guarded resume contract |
 | `--lora_target_modules` | `to_q to_k to_v to_out.0` | Which layers to apply LoRA to |
 | `--resume_from` | empty | Exact immutable `lora_N` directory to resume; never auto-selected |
 | `--trust_resume_state` | `False` | Explicitly trust PyTorch optimizer and runtime state for resume |
