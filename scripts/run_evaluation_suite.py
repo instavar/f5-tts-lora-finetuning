@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a frozen Instavar Voice generation plan with one loaded F5-TTS adapter."""
+"""Run a frozen Instavar Voice generation plan with one loaded F5-TTS model."""
 
 from __future__ import annotations
 
@@ -28,7 +28,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", default="F5TTS_Base")
     parser.add_argument("--model-checkpoint", required=True)
     parser.add_argument("--vocab-file", default="")
-    parser.add_argument("--adapter", required=True)
+    parser.add_argument(
+        "--inference-mode",
+        choices=("adapter", "base"),
+        default="adapter",
+        help="load one LoRA adapter or run the unchanged base checkpoint",
+    )
+    parser.add_argument("--adapter", help="LoRA adapter directory; required only in adapter mode")
     parser.add_argument("--reference-audio", required=True)
     parser.add_argument("--reference-text", required=True)
     parser.add_argument("--generation-plan", type=Path, required=True)
@@ -94,6 +100,16 @@ def runtime_artifact_fields(args: argparse.Namespace) -> dict[str, str]:
     return fields
 
 
+def inference_configuration(args: argparse.Namespace) -> tuple[str | None, str]:
+    if args.inference_mode == "adapter":
+        if not args.adapter:
+            raise ValueError("adapter mode requires --adapter")
+        return args.adapter, "adapter"
+    if args.adapter:
+        raise ValueError("base mode forbids --adapter so the control cannot load adapted weights")
+    return None, "base"
+
+
 def cross_fade(waves: list[np.ndarray], sample_rate: int, seconds: float = 0.15) -> np.ndarray:
     combined = waves[0]
     for wave in waves[1:]:
@@ -152,6 +168,7 @@ def main() -> int:
     if uses_mps and not torch.backends.mps.is_available():
         raise RuntimeError("MPS runtime was requested but is unavailable")
     artifact_fields = runtime_artifact_fields(args)
+    lora_path, artifact_mode = inference_configuration(args)
     rows = read_rows(args.generation_plan, args.candidate_id)
     engine = F5TTS(
         model=args.model,
@@ -159,7 +176,7 @@ def main() -> int:
         vocab_file=args.vocab_file,
         device=args.device,
         vocoder_local_path=args.vocoder_local_path,
-        lora_path=args.adapter,
+        lora_path=lora_path,
     )
 
     observations: list[dict] = []
@@ -181,8 +198,9 @@ def main() -> int:
             "seed": row["seed"],
             "requested_text": row["text"],
             "valid": False,
-            "runtime": "f5_tts_pytorch_cuda_adapter",
+            "runtime": f"f5_tts_pytorch_{device_family}_{artifact_mode}",
             **artifact_fields,
+            "artifact_mode": artifact_mode,
             "instruction_applied": False,
         }
         try:

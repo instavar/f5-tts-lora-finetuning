@@ -22,6 +22,22 @@ class EvaluationSuiteContractTests(unittest.TestCase):
         self.assertIn("torch.mps.synchronize()", source)
         self.assertNotIn("max_memory_allocated()) if torch.cuda.is_available() else 0", source)
 
+    def test_runner_separates_base_and_adapter_loading(self) -> None:
+        source = (ROOT / "scripts" / "run_evaluation_suite.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        inference_function = next(
+            node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "inference_configuration"
+        )
+        segment = ast.get_source_segment(source, inference_function)
+        self.assertIsNotNone(segment)
+        self.assertIn('choices=("adapter", "base")', source)
+        self.assertIn("adapter mode requires --adapter", segment)
+        self.assertIn("base mode forbids --adapter", segment)
+        self.assertIn('return None, "base"', segment)
+        self.assertIn("lora_path=lora_path", source)
+        self.assertIn('"artifact_mode": artifact_mode', source)
+        self.assertIn('f"f5_tts_pytorch_{device_family}_{artifact_mode}"', source)
+
     def test_lifecycle_binds_runtime_attempt_evidence(self) -> None:
         source = (ROOT / "scripts" / "instavar_voice_lifecycle.py").read_text(encoding="utf-8")
         self.assertIn("build-generation-attempt-receipt", source)

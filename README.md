@@ -221,7 +221,7 @@ Read [training & finetuning guidance](src/f5_tts/train) for more instructions.
 
 ## [Evaluation](src/f5_tts/eval)
 
-### Frozen multi-prompt adapter evaluation
+### Frozen multi-prompt base and adapter evaluation
 
 Load a selected LoRA adapter once and execute every F5-TTS row in an Instavar
 Voice generation plan:
@@ -238,6 +238,30 @@ python scripts/run_evaluation_suite.py \
   --runtime-id pytorch \
   --output-dir evaluation/f5-lora1250
 ```
+
+Generate an exact base control through the same model-loading, reference-audio,
+chunking, seed, and observation path by selecting base mode and omitting the
+adapter:
+
+```bash
+python scripts/run_evaluation_suite.py \
+  --model F5TTS_Base \
+  --model-checkpoint /path/to/model_1200000.safetensors \
+  --inference-mode base \
+  --reference-audio /path/to/reference.wav \
+  --reference-text "The exact transcript of the reference audio." \
+  --generation-plan evaluation/generation-plan.json \
+  --candidate-id f5-base \
+  --runtime-id pytorch \
+  --output-dir evaluation/f5-base
+```
+
+Adapter mode remains the default for compatibility and requires `--adapter`.
+Base mode rejects `--adapter` rather than silently loading it. Each observation
+records `artifact_mode` and a device-aware runtime label. These fields describe
+execution identity only. A base-versus-adapter quality claim still requires an
+exact matched plan, content-addressed outputs, bounded objective evidence, and
+preregistered blind listening.
 
 The runner records every planned attempt and uses the frozen seed per sample.
 The F5 path has no separate style-instruction input, so instruction prompts are
