@@ -3,7 +3,7 @@
   "repository": {
     "slug": "instavar/f5-tts-lora-finetuning",
     "url": "https://github.com/instavar/f5-tts-lora-finetuning",
-    "evidence_revision": "761ae39710848830ff9e62587eaceacf4cd7b000"
+    "evidence_revision": "fe59e686b8ceb0e6b556c6c3737e2253ce5da247"
   },
   "model": {
     "family": "F5-TTS",
@@ -43,9 +43,14 @@
               "level": "validated",
               "ref": "README.md#lora-fine-tuning-instavar-fork",
               "claim": "Adapter-only checkpoints and resume state were preserved."
+            },
+            {
+              "level": "repository_declared",
+              "ref": "tests/test_lora_resume_contract.py",
+              "claim": "Dependency-free tests cover explicit trusted numbered resume, immutable atomic checkpoint publication, data and runtime binding, epoch-addressable sample order, post-replay RNG restoration, and ownership-safe retention pruning."
             }
           ],
-          "boundary": "Saved adapter state remains separate from a promoted release package."
+          "boundary": "The guarded contract applies to new single-process Instavar LoRA checkpoints. Historical mutable lora_last state predates it, no real interrupted GPU comparison has run, and saved continuation state remains separate from a promoted release package."
         },
         "fresh_process_reload": {
           "status": "validated",
@@ -253,6 +258,7 @@
   },
   "known_gaps": [
     "Separate inherited upstream runtime breadth from Instavar's LoRA-specific contribution in release notes.",
+    "Guarded LoRA resume is dependency-free contract-tested for world_size=1, but no real interrupted-versus-uninterrupted GPU comparison has run and distributed resume remains disabled.",
     "Reproduce adapter-merged equivalence in Triton, MLX, or ONNX before promoting those runtimes.",
     "The 21-row adapter runtime suite still needs human ratings and a base-model comparison.",
     "Run the package stage with a real trained adapter, retain the receipt, and complete remote backup plus restore verification."

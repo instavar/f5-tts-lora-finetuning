@@ -12,6 +12,16 @@ A capability marked `supported` means the referenced repository evidence reaches
 
 The common evaluation pack separates deterministic audio diagnostics and objective proxies from blinded human listening. It intentionally defines no universal composite score.
 
+New Instavar LoRA checkpoints use guarded interruption resume. An immutable
+`lora_N` directory is atomically published with adapter, optimizer, scheduler,
+scaler, RNG, exact data position, and a content-bound sidecar. Resume requires
+that exact numbered directory and explicit trust. `lora_last` is only an atomic
+inference convenience symlink. Changed base, dataset, source, configuration,
+runtime, output identity, or state bytes fail before optimizer restoration, and
+retention pruning deletes only direct numeric directories carrying the
+repository's sidecar. This is a dependency-free contract result for one process,
+not evidence of real GPU continuation or distributed recovery.
+
 For a reference and candidate runtime, generate the same frozen prompt with recorded settings and run `instavar-voice-eval compare-audio reference.wav candidate.wav`. The result exposes format and signal-level deltas while explicitly refusing to claim runtime equivalence. Establish intelligibility, speaker identity, accent, cadence, and naturalness separately through objective proxies and the blind listening pack.
 
 Before training, use the contract's `audit-corpus` command with explicit train, validation, and test manifests. Supply a parent recording or source identifier through `--group-field` so the audit can reject leakage across splits. File presence and manifest integrity do not prove transcript accuracy or audio quality, which remain separate checks.
