@@ -250,7 +250,6 @@
       "baseline_candidate": "f5-tts-base",
       "adapted_candidate": "f5-tts-step-1250",
       "blockers": [
-        "No frozen base-model observation matrix exists for the same prompts and seeds.",
         "Blind listening ratings are incomplete."
       ]
     }
@@ -265,7 +264,7 @@
     "Separate inherited upstream runtime breadth from Instavar's LoRA-specific contribution in release notes.",
     "Guarded LoRA resume is dependency-free contract-tested for world_size=1, but no real interrupted-versus-uninterrupted GPU comparison has run and distributed resume remains disabled.",
     "Reproduce adapter-merged equivalence in Triton, MLX, or ONNX before promoting those runtimes.",
-    "The 21-row adapter runtime suite still needs human ratings and a base-model comparison.",
+    "The exact base versus step-1250 comparison covers one long-form prompt and seed; multi-seed coverage and human ratings remain incomplete.",
     "Run the package stage with a real trained adapter, retain the receipt, and complete remote backup plus restore verification."
   ]
 }
