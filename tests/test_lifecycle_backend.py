@@ -163,6 +163,11 @@ class LifecycleBackendTests(unittest.TestCase):
         self.assertIn('"--checkpoint_path"', source)
         self.assertIn("args.checkpoint_path or", source)
 
+    def test_lifecycle_launches_accelerate_through_current_python(self) -> None:
+        source = (ROOT / "scripts" / "instavar_voice_lifecycle.py").read_text(encoding="utf-8")
+        self.assertIn('"accelerate.commands.launch"', source)
+        self.assertNotIn('[\n        "accelerate",\n        "launch",', source)
+
     def test_archive_rejects_empty_or_symlinked_adapter(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

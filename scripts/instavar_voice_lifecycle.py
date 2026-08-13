@@ -669,8 +669,9 @@ def _train() -> None:
     work = _work()
     output = work / "train" / "output"
     command = [
-        "accelerate",
-        "launch",
+        sys.executable,
+        "-m",
+        "accelerate.commands.launch",
         "src/f5_tts/train/finetune_cli.py",
         "--exp_name",
         os.environ.get("MODEL", "F5TTS_v1_Base"),
