@@ -6,8 +6,8 @@ import shutil
 from importlib.resources import files
 from pathlib import Path
 
-from cached_path import cached_path
 import torch
+from cached_path import cached_path
 
 from f5_tts.model import CFM, DiT, Trainer, UNetT
 from f5_tts.model.dataset import load_dataset

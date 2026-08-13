@@ -88,9 +88,7 @@ def build_contract(
         "base_checkpoint": file_identity(base_checkpoint),
         "dataset": tree_identity(dataset_root),
         "optional_files": {
-            name: file_identity(path)
-            for name, path in sorted(optional_files.items())
-            if path is not None and str(path)
+            name: file_identity(path) for name, path in sorted(optional_files.items()) if path is not None and str(path)
         },
         "sources": [file_identity(path) for path in sorted((Path(path) for path in source_files), key=str)],
         "training_config": dict(training_config),

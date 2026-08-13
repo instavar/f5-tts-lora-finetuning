@@ -486,9 +486,7 @@ class Trainer:
 
             if epoch == skipped_epoch and skipped_batch:
                 progress_bar_initial = math.ceil(skipped_batch / self.grad_accumulation_steps)
-                current_dataloader = self.accelerator.skip_first_batches(
-                    train_dataloader, num_batches=skipped_batch
-                )
+                current_dataloader = self.accelerator.skip_first_batches(train_dataloader, num_batches=skipped_batch)
                 self._batches_consumed_in_epoch = skipped_batch
             else:
                 progress_bar_initial = 0
