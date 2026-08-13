@@ -18,7 +18,10 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).parents[1]
 UPSTREAM_BASE_REVISION = "82fc4fe622fe36047d1dff99b550e6018181ea11"
-PACKAGE_SCHEMA_VERSION = "1.1.0"
+PREFLIGHT_SCHEMA_VERSION = "1.3.0"
+PACKAGE_SCHEMA_VERSION = "1.2.0"
+DEFAULT_SMOKE_TEXT = "A held-out sentence verifies adapter reload."
+DEFAULT_SMOKE_SEED = 42
 SUPPORTED_MODELS = {"E2TTS_Base", "F5TTS_Base", "F5TTS_v1_Base"}
 PACKAGE_MEMBER_NAMES = {
     "dataset-lineage.json",
@@ -188,6 +191,29 @@ def _training_config() -> dict[str, str]:
     }
 
 
+def _seed(value: Any, *, label: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{label} must be an integer from 0 through 2^63 - 1")
+    try:
+        seed = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{label} must be an integer from 0 through 2^63 - 1") from error
+    if str(seed) != str(value).strip() or not 0 <= seed <= 2**63 - 1:
+        raise ValueError(f"{label} must be an integer from 0 through 2^63 - 1")
+    return seed
+
+
+def _smoke_seed() -> int:
+    return _seed(os.environ.get("SMOKE_SEED", str(DEFAULT_SMOKE_SEED)), label="SMOKE_SEED")
+
+
+def _smoke_text() -> str:
+    value = os.environ.get("SMOKE_TEXT", DEFAULT_SMOKE_TEXT)
+    if not value:
+        raise ValueError("SMOKE_TEXT must not be empty")
+    return value
+
+
 def _bound_lifecycle_inputs() -> dict[str, Any]:
     model = os.environ.get("MODEL", "F5TTS_v1_Base")
     if model not in SUPPORTED_MODELS:
@@ -195,9 +221,7 @@ def _bound_lifecycle_inputs() -> dict[str, Any]:
     reference_text = os.environ.get("REFERENCE_TEXT", "")
     if not reference_text:
         raise ValueError("REFERENCE_TEXT is required")
-    smoke_text = os.environ.get("SMOKE_TEXT", "A held-out sentence verifies adapter reload.")
-    if not smoke_text:
-        raise ValueError("SMOKE_TEXT must not be empty")
+    smoke_text = _smoke_text()
     candidate_id = os.environ.get("CANDIDATE_ID", "").strip()
     dataset_name = os.environ.get("DATASET_NAME", "").strip()
     if not candidate_id or not dataset_name:
@@ -223,6 +247,7 @@ def _bound_lifecycle_inputs() -> dict[str, Any]:
             "model": model,
             "reference_text_sha256": _text_sha256(reference_text),
             "selected_adapter_name": _safe_name(os.environ.get("SELECTED_ADAPTER_NAME", "")),
+            "smoke_seed": _smoke_seed(),
             "smoke_text_sha256": _text_sha256(smoke_text),
             "training_config": _training_config(),
         },
@@ -234,8 +259,8 @@ def _verified_preflight() -> dict[str, Any]:
     if path.is_symlink() or not path.is_file():
         raise ValueError("lifecycle has no safe preflight receipt")
     preflight = json.loads(path.read_text(encoding="utf-8"))
-    if preflight.get("schema_version") != "1.2.0" or preflight.get("status") != "passed":
-        raise ValueError("lifecycle requires a passed schema 1.2 preflight")
+    if preflight.get("schema_version") != PREFLIGHT_SCHEMA_VERSION or preflight.get("status") != "passed":
+        raise ValueError(f"lifecycle requires a passed schema {PREFLIGHT_SCHEMA_VERSION} preflight")
     if preflight.get("companion_revision") != _git_head():
         raise ValueError("companion revision changed after preflight")
     if preflight.get("bound_inputs") != _bound_lifecycle_inputs():
@@ -474,6 +499,7 @@ def _verify_package_contents(
     package: Path,
     *,
     base_checkpoint: Path,
+    reference_audio: Path,
     vocab_file: Path | None,
     vocoder_dir: Path,
 ) -> dict[str, Any]:
@@ -498,9 +524,15 @@ def _verify_package_contents(
         if path.stat().st_size != identity["bytes"] or _sha256(path) != identity["sha256"]:
             raise ValueError(f"lifecycle package member drift detected: {name}")
     dependencies = manifest.get("external_dependencies")
-    if not isinstance(dependencies, dict) or set(dependencies) != {"base_checkpoint", "vocabulary", "vocoder"}:
+    if not isinstance(dependencies, dict) or set(dependencies) != {
+        "base_checkpoint",
+        "reference_audio",
+        "vocabulary",
+        "vocoder",
+    }:
         raise ValueError("lifecycle package has an invalid external dependency contract")
     _verify_external_identity(base_checkpoint, dependencies["base_checkpoint"], "base checkpoint")
+    _verify_external_identity(reference_audio, dependencies["reference_audio"], "reference audio")
     expected_vocab = dependencies["vocabulary"]
     if expected_vocab is None:
         if vocab_file is not None:
@@ -510,6 +542,22 @@ def _verify_package_contents(
             raise ValueError("the lifecycle package requires an external vocabulary file")
         _verify_external_identity(vocab_file, expected_vocab, "vocabulary file")
     _verify_external_tree_identity(vocoder_dir, dependencies["vocoder"], "vocoder directory")
+    inference = manifest.get("inference_contract")
+    if not isinstance(inference, dict) or set(inference) != {
+        "reference_text_sha256",
+        "seed",
+        "smoke_text_sha256",
+    }:
+        raise ValueError("lifecycle package has an invalid inference contract")
+    for name in ("reference_text_sha256", "smoke_text_sha256"):
+        value = inference[name]
+        if (
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(character not in "0123456789abcdef" for character in value)
+        ):
+            raise ValueError("lifecycle package has an invalid inference contract")
+    _seed(inference["seed"], label="package inference seed")
     model = manifest.get("model")
     revision = manifest.get("companion_revision")
     if (
@@ -561,6 +609,7 @@ def _restore() -> None:
     reference_text = os.environ.get("REFERENCE_TEXT", "")
     if not reference_text:
         raise ValueError("REFERENCE_TEXT is required")
+    smoke_text = _smoke_text()
     destination_value = os.environ.get("RESTORE_OUTPUT_DIR", "").strip()
     if not destination_value:
         raise ValueError("RESTORE_OUTPUT_DIR is required")
@@ -584,7 +633,15 @@ def _restore() -> None:
             base_checkpoint=base_checkpoint,
             vocab_file=vocab_file,
             vocoder_dir=vocoder_dir,
+            reference_audio=reference_audio,
         )
+        inference = manifest["inference_contract"]
+        if _text_sha256(reference_text) != inference["reference_text_sha256"]:
+            raise ValueError("REFERENCE_TEXT does not match the lifecycle package")
+        if _text_sha256(smoke_text) != inference["smoke_text_sha256"]:
+            raise ValueError("SMOKE_TEXT does not match the lifecycle package")
+        if os.environ.get("SMOKE_SEED", "").strip() and _smoke_seed() != inference["seed"]:
+            raise ValueError("SMOKE_SEED does not match the lifecycle package")
         adapter = _extract(package / "selected-adapter.tar", staging / "restored-adapter")
         output = staging / "restored-smoke.wav"
         command = [
@@ -602,7 +659,9 @@ def _restore() -> None:
             "--ref_text",
             reference_text,
             "--gen_text",
-            os.environ.get("SMOKE_TEXT", "A restored adapter produces this held-out verification sentence."),
+            smoke_text,
+            "--seed",
+            str(inference["seed"]),
             "--output_dir",
             str(staging),
             "--output_file",
@@ -618,7 +677,7 @@ def _restore() -> None:
         _write_json(
             staging / "restore-receipt.json",
             {
-                "schema_version": "1.0.0",
+                "schema_version": "1.1.0",
                 "status": "passed",
                 "backend_id": manifest["backend_id"],
                 "model": manifest["model"],
@@ -631,6 +690,7 @@ def _restore() -> None:
                 "reference_audio": _external_file_identity(reference_audio),
                 "reference_text_sha256": _text_sha256(reference_text),
                 "smoke_text_sha256": _text_sha256(command[command.index("--gen_text") + 1]),
+                "seed": inference["seed"],
                 "restored_wav": wav,
                 "evidence_boundary": "This receipt proves package verification and a fresh-process PyTorch smoke on the declared host inputs. It does not prove remote backup, cross-runtime equivalence, perceptual quality, distribution rights, or production readiness.",
             },
@@ -675,7 +735,7 @@ def _preflight() -> None:
     _write_json(
         _work() / "preflight" / "preflight.json",
         {
-            "schema_version": "1.2.0",
+            "schema_version": PREFLIGHT_SCHEMA_VERSION,
             "status": "passed",
             "companion_revision": revision,
             "upstream_base_revision": UPSTREAM_BASE_REVISION,
@@ -760,7 +820,9 @@ def _infer() -> None:
         "--ref_text",
         os.environ["REFERENCE_TEXT"],
         "--gen_text",
-        os.environ.get("SMOKE_TEXT", "A held-out sentence verifies adapter reload."),
+        _smoke_text(),
+        "--seed",
+        str(_smoke_seed()),
         "--output_dir",
         str(output.parent),
         "--output_file",
@@ -898,8 +960,14 @@ def _package() -> None:
                     "sha256": preflight["base_checkpoint_sha256"],
                     "bytes": preflight["base_checkpoint_bytes"],
                 },
+                "reference_audio": preflight["bound_inputs"]["files"]["reference_audio"],
                 "vocabulary": expected_vocab,
                 "vocoder": preflight["bound_inputs"]["files"]["vocoder"],
+            },
+            "inference_contract": {
+                "reference_text_sha256": preflight["bound_inputs"]["values"]["reference_text_sha256"],
+                "seed": preflight["bound_inputs"]["values"]["smoke_seed"],
+                "smoke_text_sha256": preflight["bound_inputs"]["values"]["smoke_text_sha256"],
             },
             "files": files,
             "evidence_boundary": "The adapter and evidence completed the lifecycle; the base checkpoint, perceptual quality, and distribution rights remain separate dependencies and gates.",

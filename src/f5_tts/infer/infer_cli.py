@@ -30,6 +30,7 @@ from f5_tts.infer.utils_infer import (
     sway_sampling_coef,
     target_rms,
 )
+from f5_tts.model.utils import seed_everything
 
 
 parser = argparse.ArgumentParser(
@@ -185,6 +186,11 @@ parser.add_argument(
     default=None,
     help="Path to LoRA adapter directory (merges into base model at load time)",
 )
+parser.add_argument(
+    "--seed",
+    type=int,
+    help="Seed Python and PyTorch before generation for reproducible inference.",
+)
 args = parser.parse_args()
 
 
@@ -235,6 +241,9 @@ sway_sampling_coef = args.sway_sampling_coef or config.get("sway_sampling_coef",
 speed = args.speed or config.get("speed", speed)
 fix_duration = args.fix_duration or config.get("fix_duration", fix_duration)
 device = args.device or config.get("device", device)
+seed = args.seed if args.seed is not None else config.get("seed")
+if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed <= 2**63 - 1):
+    parser.error("--seed must be an integer from 0 through 2^63 - 1")
 
 
 # patches for pip pkg user
@@ -327,6 +336,8 @@ ema_model = load_model(
 
 
 def main():
+    if seed is not None:
+        seed_everything(seed)
     main_voice = {"ref_audio": ref_audio, "ref_text": ref_text}
     if "voices" not in config:
         voices = {"main": main_voice}

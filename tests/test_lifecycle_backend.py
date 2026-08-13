@@ -39,6 +39,7 @@ class LifecycleBackendTests(unittest.TestCase):
         root: Path,
         *,
         base: Path,
+        reference_audio: Path,
         vocoder: Path,
         vocabulary: Path | None = None,
         add_unbound_file: bool = False,
@@ -72,8 +73,14 @@ class LifecycleBackendTests(unittest.TestCase):
                 "companion_revision": "a" * 40,
                 "external_dependencies": {
                     "base_checkpoint": LIFECYCLE._external_file_identity(base),
+                    "reference_audio": LIFECYCLE._external_file_identity(reference_audio),
                     "vocabulary": LIFECYCLE._external_file_identity(vocabulary) if vocabulary else None,
                     "vocoder": LIFECYCLE._external_tree_identity(vocoder),
+                },
+                "inference_contract": {
+                    "reference_text_sha256": LIFECYCLE._text_sha256("Reference transcript."),
+                    "seed": 42,
+                    "smoke_text_sha256": LIFECYCLE._text_sha256(LIFECYCLE.DEFAULT_SMOKE_TEXT),
                 },
                 "files": files,
                 "evidence_boundary": "fixture",
@@ -148,7 +155,7 @@ class LifecycleBackendTests(unittest.TestCase):
                 LIFECYCLE._write_json(
                     work / "preflight" / "preflight.json",
                     {
-                        "schema_version": "1.2.0",
+                        "schema_version": LIFECYCLE.PREFLIGHT_SCHEMA_VERSION,
                         "status": "passed",
                         "companion_revision": "a" * 40,
                         "bound_inputs": bound,
@@ -160,6 +167,10 @@ class LifecycleBackendTests(unittest.TestCase):
                     LIFECYCLE._verified_preflight()
                 paths["plan"].write_bytes(b"plan\n")
                 os.environ["EPOCHS"] = "21"
+                with self.assertRaisesRegex(ValueError, "inputs or controls changed"):
+                    LIFECYCLE._verified_preflight()
+                os.environ["EPOCHS"] = "20"
+                os.environ["SMOKE_SEED"] = "43"
                 with self.assertRaisesRegex(ValueError, "inputs or controls changed"):
                     LIFECYCLE._verified_preflight()
 
@@ -183,6 +194,15 @@ class LifecycleBackendTests(unittest.TestCase):
         source = (ROOT / "src" / "f5_tts" / "infer" / "infer_cli.py").read_text(encoding="utf-8")
         self.assertIn('"--vocoder_local_path"', source)
         self.assertIn("requires --load_vocoder_from_local", source)
+        self.assertIn('"--seed"', source)
+        self.assertIn("seed_everything(seed)", source)
+
+    def test_smoke_seed_rejects_ambiguous_or_out_of_range_values(self) -> None:
+        self.assertEqual(LIFECYCLE._seed(42, label="fixture"), 42)
+        self.assertEqual(LIFECYCLE._seed("42", label="fixture"), 42)
+        for value in (True, "", "01", "1.0", -1, 2**63):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "integer from 0"):
+                LIFECYCLE._seed(value, label="fixture")
 
     def test_archive_rejects_empty_or_symlinked_adapter(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -278,7 +298,7 @@ class LifecycleBackendTests(unittest.TestCase):
             self._write_wav(reference)
             vocoder = root / "vocoder"
             self._write_vocoder(vocoder)
-            package = self._build_package(root, base=base, vocoder=vocoder)
+            package = self._build_package(root, base=base, reference_audio=reference, vocoder=vocoder)
             destination = root / "restored"
             commands: list[list[str]] = []
 
@@ -306,6 +326,7 @@ class LifecycleBackendTests(unittest.TestCase):
             self.assertEqual(len(commands), 1)
             self.assertIn("--load_vocoder_from_local", commands[0])
             self.assertEqual(commands[0][commands[0].index("--vocoder_local_path") + 1], str(vocoder.resolve()))
+            self.assertEqual(commands[0][commands[0].index("--seed") + 1], "42")
             self.assertTrue((destination / "restored-adapter" / "adapter" / "adapter_model.safetensors").is_file())
             receipt = json.loads((destination / "restore-receipt.json").read_text(encoding="utf-8"))
             self.assertEqual(receipt["status"], "passed")
@@ -320,6 +341,10 @@ class LifecycleBackendTests(unittest.TestCase):
             base.write_bytes(b"base")
             wrong_base = root / "wrong-base.safetensors"
             wrong_base.write_bytes(b"wrong")
+            wrong_reference = root / "wrong-reference.wav"
+            self._write_wav(wrong_reference)
+            with wrong_reference.open("ab") as audio:
+                audio.write(b"different")
             vocabulary = root / "vocab.txt"
             vocabulary.write_text("token\n", encoding="utf-8")
             reference = root / "reference.wav"
@@ -329,7 +354,13 @@ class LifecycleBackendTests(unittest.TestCase):
             wrong_vocoder = root / "wrong-vocoder"
             self._write_vocoder(wrong_vocoder)
             (wrong_vocoder / "pytorch_model.bin").write_bytes(b"wrong vocoder")
-            package = self._build_package(root, base=base, vocoder=vocoder, vocabulary=vocabulary)
+            package = self._build_package(
+                root,
+                base=base,
+                reference_audio=reference,
+                vocoder=vocoder,
+                vocabulary=vocabulary,
+            )
             common = {
                 "PERSISTED_PACKAGE_PATH": str(package),
                 "EXPECTED_PACKAGE_SHA256": LIFECYCLE._sha256(package),
@@ -342,6 +373,10 @@ class LifecycleBackendTests(unittest.TestCase):
                 ({"EXPECTED_PACKAGE_SHA256": "0" * 64, "VOCAB_FILE": str(vocabulary)}, "EXPECTED_PACKAGE_SHA256"),
                 ({"BASE_MODEL_CHECKPOINT": str(wrong_base), "VOCAB_FILE": str(vocabulary)}, "base checkpoint"),
                 ({"VOCAB_FILE": str(vocabulary), "VOCODER_DIR": str(wrong_vocoder)}, "vocoder directory"),
+                ({"VOCAB_FILE": str(vocabulary), "REFERENCE_AUDIO": str(wrong_reference)}, "reference audio"),
+                ({"VOCAB_FILE": str(vocabulary), "REFERENCE_TEXT": "Different transcript."}, "REFERENCE_TEXT"),
+                ({"VOCAB_FILE": str(vocabulary), "SMOKE_TEXT": "Different smoke text."}, "SMOKE_TEXT"),
+                ({"VOCAB_FILE": str(vocabulary), "SMOKE_SEED": "43"}, "SMOKE_SEED"),
                 ({}, "requires an external vocabulary"),
             )
             for index, (override, message) in enumerate(cases):
@@ -383,6 +418,7 @@ class LifecycleBackendTests(unittest.TestCase):
                 package = self._build_package(
                     root,
                     base=base,
+                    reference_audio=reference,
                     vocoder=vocoder,
                     add_unbound_file=condition == "unbound",
                     corrupt_adapter=condition == "corrupt-adapter",
@@ -434,14 +470,24 @@ class LifecycleBackendTests(unittest.TestCase):
                 {"fixture": True},
             )
             preflight = {
-                "schema_version": "1.2.0",
+                "schema_version": LIFECYCLE.PREFLIGHT_SCHEMA_VERSION,
                 "status": "passed",
                 "companion_revision": "a" * 40,
                 "model": "F5TTS_v1_Base",
                 "base_checkpoint_sha256": LIFECYCLE._sha256(base),
                 "base_checkpoint_bytes": base.stat().st_size,
                 "vocabulary": LIFECYCLE._external_file_identity(vocabulary),
-                "bound_inputs": {"files": {"vocoder": LIFECYCLE._external_tree_identity(vocoder)}},
+                "bound_inputs": {
+                    "files": {
+                        "reference_audio": LIFECYCLE._external_file_identity(reference),
+                        "vocoder": LIFECYCLE._external_tree_identity(vocoder),
+                    },
+                    "values": {
+                        "reference_text_sha256": LIFECYCLE._text_sha256("Reference transcript."),
+                        "smoke_seed": 42,
+                        "smoke_text_sha256": LIFECYCLE._text_sha256(LIFECYCLE.DEFAULT_SMOKE_TEXT),
+                    },
+                },
                 "persistent_package_root": str(store.resolve()),
                 "persistence_probe": {"device": identity.st_dev, "inode": identity.st_ino},
             }
@@ -472,9 +518,11 @@ class LifecycleBackendTests(unittest.TestCase):
                 base_checkpoint=base,
                 vocab_file=vocabulary,
                 vocoder_dir=vocoder,
+                reference_audio=reference,
             )
-            self.assertEqual(manifest["schema_version"], "1.1.0")
+            self.assertEqual(manifest["schema_version"], LIFECYCLE.PACKAGE_SCHEMA_VERSION)
             self.assertEqual(manifest["external_dependencies"]["vocabulary"]["sha256"], LIFECYCLE._sha256(vocabulary))
+            self.assertEqual(manifest["inference_contract"]["seed"], 42)
             receipt = json.loads((work / "package" / "persisted-package.json").read_text(encoding="utf-8"))
             self.assertEqual(receipt["package_sha256"], LIFECYCLE._sha256(package))
 

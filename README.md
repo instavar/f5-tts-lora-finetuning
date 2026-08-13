@@ -366,10 +366,13 @@ rights, or the existence of a real promoted package until the lifecycle runs.
 
 #### Fail-closed package restore
 
-Package schema 1.1 binds the exact seven packaged files, model identifier,
-companion revision, external base checkpoint, and optional external vocabulary.
-It also binds a local vocoder tree so fresh inference does not silently resolve
-a mutable Hub decoder.
+Package schema 1.2 binds the exact seven packaged files, model identifier,
+companion revision, external base checkpoint, optional external vocabulary,
+authorised reference audio, reference transcript hash, smoke-text hash, and
+generation seed. It also binds a local vocoder tree so fresh inference does not
+silently resolve a mutable Hub decoder. The lifecycle defaults `SMOKE_SEED` to
+`42`, records it in preflight, and passes it to both the original smoke and the
+restored smoke.
 The standalone `restore` action requires an independently supplied outer package
 SHA-256, rejects archive traversal, links, duplicate members, extra files,
 member drift, and external dependency drift, then extracts the inner adapter and
@@ -383,6 +386,7 @@ BASE_MODEL_CHECKPOINT=/absolute/path/model.safetensors \
 VOCODER_DIR=/absolute/path/vocos-mel-24khz \
 REFERENCE_AUDIO=/absolute/path/authorised-reference.wav \
 REFERENCE_TEXT='Exact transcript for the reference audio.' \
+SMOKE_TEXT='A held-out sentence verifies adapter reload.' \
 RESTORE_OUTPUT_DIR=/absolute/path/new-restored-directory \
 INSTAVAR_VOICE_STAGE_RESULT=/absolute/path/restore-stage.json \
 python scripts/instavar_voice_lifecycle.py restore
@@ -390,8 +394,10 @@ python scripts/instavar_voice_lifecycle.py restore
 
 Set `VOCAB_FILE` when the package declares an external vocabulary. Supplying a
 vocabulary to a package that declares none, or omitting one that is declared,
-fails closed. `RESTORE_OUTPUT_DIR` must be an absent absolute child path under an
-existing non-symbolic parent.
+fails closed. A changed reference file, reference transcript, smoke text, or
+optional `SMOKE_SEED` assertion also fails closed. Restore always uses the seed
+recorded in the verified package. `RESTORE_OUTPUT_DIR` must be an absent absolute
+child path under an existing non-symbolic parent.
 
 A passed restore receipt establishes archive verification, external dependency
 matching, adapter extraction, and one fresh PyTorch smoke on the declared host
