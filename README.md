@@ -327,7 +327,8 @@ multi-chunk frozen evaluator, and packages the adapter plus preflight, smoke,
 evaluation, experiment, and plan evidence. Set `PERSISTED_PACKAGE_ROOT` to an
 existing directory outside the checkout and lifecycle work directory. Preflight
 probes durable writes and no-overwrite atomic publication; packaging stores the
-archive only if that resolved path and filesystem device still match preflight,
+archive only if that resolved path, filesystem device, and directory inode still
+match preflight,
 under a content-addressed name, and writes
 `package/persisted-package.json` as its receipt.
 

@@ -78,7 +78,13 @@ def _probe_persistent_package_root(root: Path) -> dict[str, Any]:
         _fsync_directory(root)
         if linked_path.read_bytes() != probe_path.read_bytes():
             raise ValueError("persistent package root failed its atomic publication probe")
-        return {"writable": True, "atomic_hard_link": True, "device": root.stat().st_dev}
+        identity = root.stat()
+        return {
+            "writable": True,
+            "atomic_hard_link": True,
+            "device": identity.st_dev,
+            "inode": identity.st_ino,
+        }
     except OSError as error:
         raise ValueError(f"PERSISTED_PACKAGE_ROOT cannot publish an atomic package: {error}") from error
     finally:
@@ -92,7 +98,13 @@ def _locked_persistent_package_root(preflight: dict[str, Any]) -> Path:
     root = _persistent_package_root()
     recorded_root = preflight.get("persistent_package_root")
     recorded_device = preflight.get("persistence_probe", {}).get("device")
-    if recorded_root != str(root) or recorded_device != root.stat().st_dev:
+    recorded_inode = preflight.get("persistence_probe", {}).get("inode")
+    identity = root.stat()
+    if (
+        recorded_root != str(root)
+        or recorded_device != identity.st_dev
+        or recorded_inode != identity.st_ino
+    ):
         raise ValueError("PERSISTED_PACKAGE_ROOT changed after preflight")
     return root
 

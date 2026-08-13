@@ -148,8 +148,11 @@ class LifecycleBackendTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             result = LIFECYCLE._probe_persistent_package_root(root)
+            identity = root.stat()
             self.assertTrue(result["writable"])
             self.assertTrue(result["atomic_hard_link"])
+            self.assertEqual(result["device"], identity.st_dev)
+            self.assertEqual(result["inode"], identity.st_ino)
             self.assertEqual(list(root.iterdir()), [])
 
     def test_persistence_probe_does_not_unlink_a_link_it_did_not_create(self) -> None:
@@ -165,7 +168,7 @@ class LifecycleBackendTests(unittest.TestCase):
             self.assertEqual(len(unlinked), 1)
             self.assertTrue(str(unlinked[0]).endswith(".partial"))
 
-    def test_package_root_is_bound_to_preflight_path_and_device(self) -> None:
+    def test_package_root_is_bound_to_preflight_path_device_and_inode(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             work = root / "work"
@@ -173,13 +176,14 @@ class LifecycleBackendTests(unittest.TestCase):
             other = root / "other"
             for path in (work, store, other):
                 path.mkdir()
+            identity = store.stat()
             environment = {
                 "INSTAVAR_VOICE_WORK_DIR": str(work),
                 "PERSISTED_PACKAGE_ROOT": str(store),
             }
             preflight = {
                 "persistent_package_root": str(store.resolve()),
-                "persistence_probe": {"device": store.stat().st_dev},
+                "persistence_probe": {"device": identity.st_dev, "inode": identity.st_ino},
             }
             with patch.dict(os.environ, environment, clear=False):
                 self.assertEqual(LIFECYCLE._locked_persistent_package_root(preflight), store.resolve())
@@ -188,10 +192,22 @@ class LifecycleBackendTests(unittest.TestCase):
                     LIFECYCLE._locked_persistent_package_root(changed_path)
                 changed_device = {
                     **preflight,
-                    "persistence_probe": {"device": store.stat().st_dev + 1},
+                    "persistence_probe": {"device": identity.st_dev + 1, "inode": identity.st_ino},
                 }
                 with self.assertRaisesRegex(ValueError, "changed after preflight"):
                     LIFECYCLE._locked_persistent_package_root(changed_device)
+                changed_inode = {
+                    **preflight,
+                    "persistence_probe": {"device": identity.st_dev, "inode": identity.st_ino + 1},
+                }
+                with self.assertRaisesRegex(ValueError, "changed after preflight"):
+                    LIFECYCLE._locked_persistent_package_root(changed_inode)
+
+                store.rename(root / "retired-store")
+                store.mkdir()
+                self.assertEqual(store.stat().st_dev, identity.st_dev)
+                with self.assertRaisesRegex(ValueError, "changed after preflight"):
+                    LIFECYCLE._locked_persistent_package_root(preflight)
 
     def test_dataset_lineage_binds_raw_splits_to_implicit_f5_dataset(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
