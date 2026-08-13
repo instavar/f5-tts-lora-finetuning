@@ -194,6 +194,14 @@ class Trainer:
                     lora_dir = os.path.join(self.checkpoint_path, f".lora_{update}.partial.{os.getpid()}")
                     os.mkdir(lora_dir)
                     unwrapped.save_pretrained(lora_dir)
+                    adapter_config_path = os.path.join(lora_dir, "adapter_config.json")
+                    with open(adapter_config_path, encoding="utf-8") as handle:
+                        adapter_config = json.load(handle)
+                    if isinstance(adapter_config.get("target_modules"), list):
+                        adapter_config["target_modules"] = sorted(adapter_config["target_modules"])
+                    with open(adapter_config_path, "w", encoding="utf-8") as handle:
+                        json.dump(adapter_config, handle, ensure_ascii=False, indent=2, sort_keys=True)
+                        handle.write("\n")
                     training_state_path = os.path.join(lora_dir, "training_state.pt")
                     torch.save(
                         dict(

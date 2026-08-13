@@ -7,6 +7,7 @@ import random
 from collections import defaultdict
 from importlib.resources import files
 
+import numpy as np
 import rjieba
 import torch
 from pypinyin import Style, lazy_pinyin
@@ -18,6 +19,7 @@ from torch.nn.utils.rnn import pad_sequence
 
 def seed_everything(seed=0):
     random.seed(seed)
+    np.random.seed(seed % (2**32))
     os.environ["PYTHONHASHSEED"] = str(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)

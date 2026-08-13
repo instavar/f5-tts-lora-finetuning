@@ -256,8 +256,13 @@ class LoRATrainerSourceContractTest(unittest.TestCase):
 
     def test_lora_checkpoint_is_atomic_and_immutable(self):
         self.assertIn("Refusing to reuse unowned immutable LoRA checkpoint", self.trainer)
+        self.assertIn('adapter_config["target_modules"] = sorted', self.trainer)
         self.assertIn("os.replace(lora_dir, final_dir)", self.trainer)
         self.assertIn("os.symlink(os.path.basename(final_dir)", self.trainer)
+
+    def test_shared_seed_helper_covers_numpy(self):
+        utils = (ROOT / "src/f5_tts/model/utils.py").read_text(encoding="utf-8")
+        self.assertIn("np.random.seed(seed % (2**32))", utils)
 
 
 if __name__ == "__main__":
