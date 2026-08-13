@@ -29,11 +29,17 @@ class LifecycleBackendTests(unittest.TestCase):
             audio.setframerate(24000)
             audio.writeframes(b"\x00\x00" * 240)
 
+    def _write_vocoder(self, path: Path) -> None:
+        path.mkdir()
+        (path / "config.yaml").write_text("feature_extractor: fixture\n", encoding="utf-8")
+        (path / "pytorch_model.bin").write_bytes(b"vocoder")
+
     def _build_package(
         self,
         root: Path,
         *,
         base: Path,
+        vocoder: Path,
         vocabulary: Path | None = None,
         add_unbound_file: bool = False,
         corrupt_adapter: bool = False,
@@ -67,6 +73,7 @@ class LifecycleBackendTests(unittest.TestCase):
                 "external_dependencies": {
                     "base_checkpoint": LIFECYCLE._external_file_identity(base),
                     "vocabulary": LIFECYCLE._external_file_identity(vocabulary) if vocabulary else None,
+                    "vocoder": LIFECYCLE._external_tree_identity(vocoder),
                 },
                 "files": files,
                 "evidence_boundary": "fixture",
@@ -82,6 +89,7 @@ class LifecycleBackendTests(unittest.TestCase):
         self.assertEqual(spec["capability_binding"]["adaptation"], "lora")
         required = {item["name"] for item in spec["required_environment"]}
         self.assertIn("PERSISTED_PACKAGE_ROOT", required)
+        self.assertIn("VOCODER_DIR", required)
         self.assertIn("package/persisted-package.json", spec["expected_artifacts"]["package"])
         for stage in ("preflight", "train", "infer", "evaluate", "package"):
             self.assertEqual(spec["commands"][stage][-1], stage)
@@ -114,6 +122,8 @@ class LifecycleBackendTests(unittest.TestCase):
                 path = root / name
                 path.write_bytes(f"{name}\n".encode())
                 paths[name] = path
+            vocoder = root / "vocoder"
+            self._write_vocoder(vocoder)
             environment = {
                 "INSTAVAR_VOICE_WORK_DIR": str(work),
                 "BASE_MODEL_CHECKPOINT": str(paths["base"]),
@@ -124,6 +134,7 @@ class LifecycleBackendTests(unittest.TestCase):
                 "RAW_VALIDATION_JSONL": str(paths["validation"]),
                 "RAW_TEST_JSONL": str(paths["test"]),
                 "REFERENCE_AUDIO": str(paths["reference"]),
+                "VOCODER_DIR": str(vocoder),
                 "REFERENCE_TEXT": "Reference transcript.",
                 "CANDIDATE_ID": "f5-fixture",
                 "DATASET_NAME": "fixture",
@@ -167,6 +178,11 @@ class LifecycleBackendTests(unittest.TestCase):
         source = (ROOT / "scripts" / "instavar_voice_lifecycle.py").read_text(encoding="utf-8")
         self.assertIn('"accelerate.commands.launch"', source)
         self.assertNotIn('[\n        "accelerate",\n        "launch",', source)
+
+    def test_inference_cli_accepts_only_explicit_local_vocoder_mode(self) -> None:
+        source = (ROOT / "src" / "f5_tts" / "infer" / "infer_cli.py").read_text(encoding="utf-8")
+        self.assertIn('"--vocoder_local_path"', source)
+        self.assertIn("requires --load_vocoder_from_local", source)
 
     def test_archive_rejects_empty_or_symlinked_adapter(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -260,7 +276,9 @@ class LifecycleBackendTests(unittest.TestCase):
             base.write_bytes(b"base")
             reference = root / "reference.wav"
             self._write_wav(reference)
-            package = self._build_package(root, base=base)
+            vocoder = root / "vocoder"
+            self._write_vocoder(vocoder)
+            package = self._build_package(root, base=base, vocoder=vocoder)
             destination = root / "restored"
             commands: list[list[str]] = []
 
@@ -275,6 +293,7 @@ class LifecycleBackendTests(unittest.TestCase):
                 "EXPECTED_PACKAGE_SHA256": LIFECYCLE._sha256(package),
                 "BASE_MODEL_CHECKPOINT": str(base),
                 "REFERENCE_AUDIO": str(reference),
+                "VOCODER_DIR": str(vocoder),
                 "REFERENCE_TEXT": "Reference transcript.",
                 "RESTORE_OUTPUT_DIR": str(destination),
             }
@@ -285,6 +304,8 @@ class LifecycleBackendTests(unittest.TestCase):
                 LIFECYCLE._restore()
 
             self.assertEqual(len(commands), 1)
+            self.assertIn("--load_vocoder_from_local", commands[0])
+            self.assertEqual(commands[0][commands[0].index("--vocoder_local_path") + 1], str(vocoder.resolve()))
             self.assertTrue((destination / "restored-adapter" / "adapter" / "adapter_model.safetensors").is_file())
             receipt = json.loads((destination / "restore-receipt.json").read_text(encoding="utf-8"))
             self.assertEqual(receipt["status"], "passed")
@@ -303,17 +324,24 @@ class LifecycleBackendTests(unittest.TestCase):
             vocabulary.write_text("token\n", encoding="utf-8")
             reference = root / "reference.wav"
             self._write_wav(reference)
-            package = self._build_package(root, base=base, vocabulary=vocabulary)
+            vocoder = root / "vocoder"
+            self._write_vocoder(vocoder)
+            wrong_vocoder = root / "wrong-vocoder"
+            self._write_vocoder(wrong_vocoder)
+            (wrong_vocoder / "pytorch_model.bin").write_bytes(b"wrong vocoder")
+            package = self._build_package(root, base=base, vocoder=vocoder, vocabulary=vocabulary)
             common = {
                 "PERSISTED_PACKAGE_PATH": str(package),
                 "EXPECTED_PACKAGE_SHA256": LIFECYCLE._sha256(package),
                 "BASE_MODEL_CHECKPOINT": str(base),
                 "REFERENCE_AUDIO": str(reference),
+                "VOCODER_DIR": str(vocoder),
                 "REFERENCE_TEXT": "Reference transcript.",
             }
             cases = (
                 ({"EXPECTED_PACKAGE_SHA256": "0" * 64, "VOCAB_FILE": str(vocabulary)}, "EXPECTED_PACKAGE_SHA256"),
                 ({"BASE_MODEL_CHECKPOINT": str(wrong_base), "VOCAB_FILE": str(vocabulary)}, "base checkpoint"),
+                ({"VOCAB_FILE": str(vocabulary), "VOCODER_DIR": str(wrong_vocoder)}, "vocoder directory"),
                 ({}, "requires an external vocabulary"),
             )
             for index, (override, message) in enumerate(cases):
@@ -350,9 +378,12 @@ class LifecycleBackendTests(unittest.TestCase):
                 base.write_bytes(b"base")
                 reference = root / "reference.wav"
                 self._write_wav(reference)
+                vocoder = root / "vocoder"
+                self._write_vocoder(vocoder)
                 package = self._build_package(
                     root,
                     base=base,
+                    vocoder=vocoder,
                     add_unbound_file=condition == "unbound",
                     corrupt_adapter=condition == "corrupt-adapter",
                 )
@@ -362,6 +393,7 @@ class LifecycleBackendTests(unittest.TestCase):
                     "EXPECTED_PACKAGE_SHA256": LIFECYCLE._sha256(package),
                     "BASE_MODEL_CHECKPOINT": str(base),
                     "REFERENCE_AUDIO": str(reference),
+                    "VOCODER_DIR": str(vocoder),
                     "REFERENCE_TEXT": "Reference transcript.",
                     "RESTORE_OUTPUT_DIR": str(destination),
                 }
@@ -386,6 +418,8 @@ class LifecycleBackendTests(unittest.TestCase):
             base.write_bytes(b"base")
             vocabulary = root / "vocab.txt"
             vocabulary.write_text("token\n", encoding="utf-8")
+            vocoder = root / "vocoder"
+            self._write_vocoder(vocoder)
             reference = root / "reference.wav"
             self._write_wav(reference)
             adapter = root / "adapter"
@@ -407,6 +441,7 @@ class LifecycleBackendTests(unittest.TestCase):
                 "base_checkpoint_sha256": LIFECYCLE._sha256(base),
                 "base_checkpoint_bytes": base.stat().st_size,
                 "vocabulary": LIFECYCLE._external_file_identity(vocabulary),
+                "bound_inputs": {"files": {"vocoder": LIFECYCLE._external_tree_identity(vocoder)}},
                 "persistent_package_root": str(store.resolve()),
                 "persistence_probe": {"device": identity.st_dev, "inode": identity.st_ino},
             }
@@ -422,6 +457,7 @@ class LifecycleBackendTests(unittest.TestCase):
                 "GENERATION_PLAN": str(documents["plan"]),
                 "DATASET_LINEAGE": str(documents["lineage"]),
                 "VOCAB_FILE": str(vocabulary),
+                "VOCODER_DIR": str(vocoder),
                 "MODEL": "F5TTS_v1_Base",
             }
             with (
@@ -435,6 +471,7 @@ class LifecycleBackendTests(unittest.TestCase):
                 unpacked,
                 base_checkpoint=base,
                 vocab_file=vocabulary,
+                vocoder_dir=vocoder,
             )
             self.assertEqual(manifest["schema_version"], "1.1.0")
             self.assertEqual(manifest["external_dependencies"]["vocabulary"]["sha256"], LIFECYCLE._sha256(vocabulary))

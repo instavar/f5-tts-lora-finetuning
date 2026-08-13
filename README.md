@@ -368,6 +368,8 @@ rights, or the existence of a real promoted package until the lifecycle runs.
 
 Package schema 1.1 binds the exact seven packaged files, model identifier,
 companion revision, external base checkpoint, and optional external vocabulary.
+It also binds a local vocoder tree so fresh inference does not silently resolve
+a mutable Hub decoder.
 The standalone `restore` action requires an independently supplied outer package
 SHA-256, rejects archive traversal, links, duplicate members, extra files,
 member drift, and external dependency drift, then extracts the inner adapter and
@@ -378,6 +380,7 @@ after a valid WAV and restore receipt exist.
 PERSISTED_PACKAGE_PATH=/absolute/path/f5-tts-lora-package-sha256-....tar \
 EXPECTED_PACKAGE_SHA256=<sha256-from-an-independent-receipt> \
 BASE_MODEL_CHECKPOINT=/absolute/path/model.safetensors \
+VOCODER_DIR=/absolute/path/vocos-mel-24khz \
 REFERENCE_AUDIO=/absolute/path/authorised-reference.wav \
 REFERENCE_TEXT='Exact transcript for the reference audio.' \
 RESTORE_OUTPUT_DIR=/absolute/path/new-restored-directory \

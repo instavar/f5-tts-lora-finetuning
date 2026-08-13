@@ -13,6 +13,7 @@
     { "name": "DATASET_NAME", "purpose": "F5-TTS prepared dataset identifier." },
     { "name": "DATASET_LINEAGE", "purpose": "Content-addressed receipt binding audited splits to the complete prepared dataset tree." },
     { "name": "BASE_MODEL_CHECKPOINT", "purpose": "Pinned base F5-TTS checkpoint used for LoRA training and inference." },
+    { "name": "VOCODER_DIR", "purpose": "Content-bound local Vocos directory used for inference, evaluation, and restore." },
     { "name": "REFERENCE_AUDIO", "purpose": "Authorized reference-speaker audio for reload and held-out synthesis." },
     { "name": "REFERENCE_TEXT", "purpose": "Transcript matching the authorized reference audio." },
     { "name": "SELECTED_ADAPTER_NAME", "purpose": "Single safe LoRA directory produced under the explicit checkpoint output." },

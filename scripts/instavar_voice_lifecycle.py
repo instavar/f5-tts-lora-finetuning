@@ -156,6 +156,17 @@ def _tree_sha256(root: Path) -> str:
     return digest.hexdigest()
 
 
+def _external_tree_identity(root: Path) -> dict[str, Any]:
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError(f"external dependency tree is missing or unsafe: {root}")
+    files = [path for path in root.rglob("*") if path.is_file()]
+    return {
+        "sha256": _tree_sha256(root),
+        "bytes": sum(path.stat().st_size for path in files),
+        "files": len(files),
+    }
+
+
 def _safe_name(value: str) -> str:
     path = Path(value)
     if not value or value in {".", ".."} or path.is_absolute() or len(path.parts) != 1:
@@ -203,6 +214,7 @@ def _bound_lifecycle_inputs() -> dict[str, Any]:
             "raw_validation": _external_file_identity(_path("RAW_VALIDATION_JSONL")),
             "reference_audio": _external_file_identity(_path("REFERENCE_AUDIO")),
             "vocabulary": _external_file_identity(vocab_file) if vocab_file is not None else None,
+            "vocoder": _external_tree_identity(_path("VOCODER_DIR", directory=True)),
         },
         "values": {
             "candidate_id": candidate_id,
@@ -453,7 +465,18 @@ def _verify_external_identity(path: Path, expected: Any, label: str) -> None:
         raise ValueError(f"{label} does not match the lifecycle package")
 
 
-def _verify_package_contents(package: Path, *, base_checkpoint: Path, vocab_file: Path | None) -> dict[str, Any]:
+def _verify_external_tree_identity(path: Path, expected: Any, label: str) -> None:
+    if not isinstance(expected, dict) or _external_tree_identity(path) != expected:
+        raise ValueError(f"{label} does not match the lifecycle package")
+
+
+def _verify_package_contents(
+    package: Path,
+    *,
+    base_checkpoint: Path,
+    vocab_file: Path | None,
+    vocoder_dir: Path,
+) -> dict[str, Any]:
     manifest_path = package / "package-manifest.json"
     if manifest_path.is_symlink() or not manifest_path.is_file():
         raise ValueError("lifecycle package has no safe package-manifest.json")
@@ -475,7 +498,7 @@ def _verify_package_contents(package: Path, *, base_checkpoint: Path, vocab_file
         if path.stat().st_size != identity["bytes"] or _sha256(path) != identity["sha256"]:
             raise ValueError(f"lifecycle package member drift detected: {name}")
     dependencies = manifest.get("external_dependencies")
-    if not isinstance(dependencies, dict) or set(dependencies) != {"base_checkpoint", "vocabulary"}:
+    if not isinstance(dependencies, dict) or set(dependencies) != {"base_checkpoint", "vocabulary", "vocoder"}:
         raise ValueError("lifecycle package has an invalid external dependency contract")
     _verify_external_identity(base_checkpoint, dependencies["base_checkpoint"], "base checkpoint")
     expected_vocab = dependencies["vocabulary"]
@@ -486,6 +509,7 @@ def _verify_package_contents(package: Path, *, base_checkpoint: Path, vocab_file
         if vocab_file is None:
             raise ValueError("the lifecycle package requires an external vocabulary file")
         _verify_external_identity(vocab_file, expected_vocab, "vocabulary file")
+    _verify_external_tree_identity(vocoder_dir, dependencies["vocoder"], "vocoder directory")
     model = manifest.get("model")
     revision = manifest.get("companion_revision")
     if (
@@ -532,6 +556,7 @@ def _restore() -> None:
         raise ValueError("persisted lifecycle package does not match EXPECTED_PACKAGE_SHA256")
     base_checkpoint = _path("BASE_MODEL_CHECKPOINT")
     vocab_file = _path("VOCAB_FILE") if os.environ.get("VOCAB_FILE", "").strip() else None
+    vocoder_dir = _path("VOCODER_DIR", directory=True)
     reference_audio = _path("REFERENCE_AUDIO")
     reference_text = os.environ.get("REFERENCE_TEXT", "")
     if not reference_text:
@@ -558,6 +583,7 @@ def _restore() -> None:
             package,
             base_checkpoint=base_checkpoint,
             vocab_file=vocab_file,
+            vocoder_dir=vocoder_dir,
         )
         adapter = _extract(package / "selected-adapter.tar", staging / "restored-adapter")
         output = staging / "restored-smoke.wav"
@@ -581,6 +607,9 @@ def _restore() -> None:
             str(staging),
             "--output_file",
             output.name,
+            "--load_vocoder_from_local",
+            "--vocoder_local_path",
+            str(vocoder_dir),
         ]
         if vocab_file is not None:
             command.extend(["--vocab_file", str(vocab_file)])
@@ -597,6 +626,7 @@ def _restore() -> None:
                 "package_manifest_sha256": _sha256(package / "package-manifest.json"),
                 "base_checkpoint": _external_file_identity(base_checkpoint),
                 "vocabulary": _external_file_identity(vocab_file) if vocab_file is not None else None,
+                "vocoder": _external_tree_identity(vocoder_dir),
                 "adapter_tree_sha256": _tree_sha256(adapter),
                 "reference_audio": _external_file_identity(reference_audio),
                 "reference_text_sha256": _text_sha256(reference_text),
@@ -735,6 +765,9 @@ def _infer() -> None:
         str(output.parent),
         "--output_file",
         output.name,
+        "--load_vocoder_from_local",
+        "--vocoder_local_path",
+        str(_path("VOCODER_DIR", directory=True)),
     ]
     if os.environ.get("VOCAB_FILE"):
         command.extend(["--vocab_file", os.environ["VOCAB_FILE"]])
@@ -768,6 +801,8 @@ def _evaluate() -> None:
         "--output-dir",
         str(output),
         "--allow-invalid-output",
+        "--vocoder-local-path",
+        str(_path("VOCODER_DIR", directory=True)),
     ]
     if os.environ.get("VOCAB_FILE"):
         command.extend(["--vocab-file", os.environ["VOCAB_FILE"]])
@@ -864,6 +899,7 @@ def _package() -> None:
                     "bytes": preflight["base_checkpoint_bytes"],
                 },
                 "vocabulary": expected_vocab,
+                "vocoder": preflight["bound_inputs"]["files"]["vocoder"],
             },
             "files": files,
             "evidence_boundary": "The adapter and evidence completed the lifecycle; the base checkpoint, perceptual quality, and distribution rights remain separate dependencies and gates.",
