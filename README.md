@@ -443,6 +443,13 @@ epoch count must remain identical because this is interruption recovery, not a
 new continuation experiment. `lora_last` is now an atomic relative symlink for
 inference convenience only and is never a resume authority.
 
+For the executable lifecycle, set `ALLOW_TRAIN_RESUME=1` before preflight when
+the run may be interrupted. If training stops after an immutable numbered
+checkpoint is published, rerun the `train` stage with `TRAIN_RESUME_FROM` set
+to that exact `work/train/output/lora_N` child. The wrapper passes trusted-state
+authorization only for that validated lifecycle-owned child. Changing the
+preflight resume-authority bit or any other bound input still fails closed.
+
 Both frame and sample batching use epoch-addressable ordering. The trainer
 replays the recorded number of batches before restoring post-checkpoint model
 RNG state. Sample-audio logging runs before the checkpoint captures RNG so a

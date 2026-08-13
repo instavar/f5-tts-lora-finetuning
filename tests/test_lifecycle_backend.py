@@ -184,6 +184,37 @@ class LifecycleBackendTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 LIFECYCLE._safe_name(unsafe)
 
+    def test_lifecycle_resume_requires_preflight_authority_and_exact_output_child(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "output"
+            output.mkdir()
+            checkpoint = output / "lora_1"
+            checkpoint.mkdir()
+            preflight = {"bound_inputs": {"values": {"allow_train_resume": True}}}
+            with patch.dict(os.environ, {"TRAIN_RESUME_FROM": str(checkpoint)}, clear=True):
+                self.assertEqual(LIFECYCLE._training_resume_checkpoint(output, preflight), checkpoint.resolve())
+                denied = {"bound_inputs": {"values": {"allow_train_resume": False}}}
+                with self.assertRaisesRegex(ValueError, "ALLOW_TRAIN_RESUME=1"):
+                    LIFECYCLE._training_resume_checkpoint(output, denied)
+                outside = root / "lora_1"
+                outside.mkdir()
+                os.environ["TRAIN_RESUME_FROM"] = str(outside)
+                with self.assertRaisesRegex(ValueError, "lifecycle output"):
+                    LIFECYCLE._training_resume_checkpoint(output, preflight)
+
+    def test_allow_train_resume_is_one_strict_preflight_bit(self) -> None:
+        for value, expected in (("0", False), ("1", True)):
+            with patch.dict(os.environ, {"ALLOW_TRAIN_RESUME": value}, clear=True):
+                self.assertIs(LIFECYCLE._allow_train_resume(), expected)
+        for value in ("true", "yes", "2", ""):
+            with (
+                self.subTest(value=value),
+                patch.dict(os.environ, {"ALLOW_TRAIN_RESUME": value}, clear=True),
+                self.assertRaisesRegex(ValueError, "must be 0 or 1"),
+            ):
+                LIFECYCLE._allow_train_resume()
+
     def test_trainer_accepts_explicit_checkpoint_path(self) -> None:
         source = (ROOT / "src" / "f5_tts" / "train" / "finetune_cli.py").read_text()
         self.assertIn('"--checkpoint_path"', source)

@@ -215,6 +215,30 @@ def _smoke_text() -> str:
     return value
 
 
+def _allow_train_resume() -> bool:
+    value = os.environ.get("ALLOW_TRAIN_RESUME", "0").strip()
+    if value not in {"0", "1"}:
+        raise ValueError("ALLOW_TRAIN_RESUME must be 0 or 1")
+    return value == "1"
+
+
+def _training_resume_checkpoint(output: Path, preflight: dict[str, Any]) -> Path | None:
+    value = os.environ.get("TRAIN_RESUME_FROM", "").strip()
+    if not value:
+        return None
+    if not preflight["bound_inputs"]["values"].get("allow_train_resume"):
+        raise ValueError("TRAIN_RESUME_FROM requires ALLOW_TRAIN_RESUME=1 at preflight")
+    raw = Path(value).expanduser()
+    if raw.is_symlink():
+        raise ValueError("TRAIN_RESUME_FROM must not be a symlink")
+    checkpoint = raw.resolve(strict=True)
+    resolved_output = output.resolve(strict=True)
+    suffix = checkpoint.name.removeprefix("lora_")
+    if checkpoint.parent != resolved_output or not checkpoint.is_dir() or not suffix.isdigit():
+        raise ValueError("TRAIN_RESUME_FROM must be one immutable lora_N child of the lifecycle output")
+    return checkpoint
+
+
 def _bound_lifecycle_inputs() -> dict[str, Any]:
     model = os.environ.get("MODEL", "F5TTS_v1_Base")
     if model not in SUPPORTED_MODELS:
@@ -242,6 +266,7 @@ def _bound_lifecycle_inputs() -> dict[str, Any]:
             "vocoder": _external_tree_identity(_path("VOCODER_DIR", directory=True)),
         },
         "values": {
+            "allow_train_resume": _allow_train_resume(),
             "candidate_id": candidate_id,
             "corpus_group_field": os.environ.get("CORPUS_GROUP_FIELD", ""),
             "dataset_name": dataset_name,
@@ -755,7 +780,7 @@ def _preflight() -> None:
 
 
 def _train() -> None:
-    _verified_preflight()
+    preflight = _verified_preflight()
     _verify_dataset_lineage()
     work = _work()
     output = work / "train" / "output"
@@ -795,6 +820,9 @@ def _train() -> None:
         "--checkpoint_path",
         str(output),
     ]
+    resume_from = _training_resume_checkpoint(output, preflight)
+    if resume_from is not None:
+        command.extend(["--resume_from", str(resume_from), "--trust_resume_state"])
     _run(command)
     _archive(
         output / _safe_name(os.environ["SELECTED_ADAPTER_NAME"]),
