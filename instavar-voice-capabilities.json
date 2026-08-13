@@ -3,7 +3,7 @@
   "repository": {
     "slug": "instavar/f5-tts-lora-finetuning",
     "url": "https://github.com/instavar/f5-tts-lora-finetuning",
-    "evidence_revision": "8b5d1a335446d707dd75846b56e77e622283fc51"
+    "evidence_revision": "1816042223d4e84c8bd174a59a18aa8fcdd9e601"
   },
   "model": {
     "family": "F5-TTS",
@@ -91,15 +91,20 @@
           "boundary": "The exact base-model comparison covers one prompt and seed. No blind ratings, multi-seed long-form matrix, or quality winner is recorded."
         },
         "packaging": {
-          "status": "repository_declared",
+          "status": "smoke_tested",
           "evidence": [
             {
               "level": "repository_declared",
               "ref": "INSTAVAR_VOICE_CONFORMANCE.md",
               "claim": "The lifecycle publishes a content-addressed LoRA package to a preflight-probed external root and records a receipt."
+            },
+            {
+              "level": "smoke_tested",
+              "ref": "reports/package-restore-gpu-2026-08-14.md",
+              "claim": "A clean RTX 3090 Ti drill completed bounded LoRA training, local-vocoder inference, packaging, two independent restores, exact seeded WAV equality, and live fail-closed seed and text probes."
             }
           ],
-          "boundary": "Dependency-free tests establish retention mechanics only. No real package, remote backup, restore drill, or rights-reviewed release is recorded."
+          "boundary": "The real drill covers one tiny dataset, prompt, seed, host, and PyTorch CUDA path. No remote backup, second-host recovery, cross-runtime equivalence, perceptual quality result, or rights-reviewed release is recorded."
         }
       }
     },
@@ -294,6 +299,6 @@
     "Guarded LoRA resume is dependency-free contract-tested for world_size=1, but no real interrupted-versus-uninterrupted GPU comparison has run and distributed resume remains disabled.",
     "Reproduce adapter-merged equivalence in Triton, MLX, or ONNX before promoting those runtimes.",
     "The exact base versus step-1250 comparison covers one long-form prompt and seed; multi-seed coverage and human ratings remain incomplete.",
-    "Run the package stage with a real trained adapter, retain the receipt, and complete remote backup plus restore verification."
+    "Back up the qualified package to an independent remote system and reproduce restore on a second host before making a disaster-recovery claim."
   ]
 }
