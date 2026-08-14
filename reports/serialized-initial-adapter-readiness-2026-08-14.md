@@ -20,7 +20,10 @@ forwards it to the trainer.
 
 This closes the repository implementation gap between a deterministic
 initialization declaration and an explicitly serialized and loaded initial
-adapter. It does not retroactively upgrade earlier evaluator evidence.
+adapter. A subsequent bounded GPU experiment exercised that exact path and is
+recorded in
+[`resume-serialized-initial-live-conditioned-gpu-2026-08-14.md`](resume-serialized-initial-live-conditioned-gpu-2026-08-14.md).
+It does not retroactively upgrade earlier evaluator evidence.
 
 ## OOD controls
 
@@ -42,17 +45,21 @@ The complete dependency-free repository suite passed 57 tests. The capability,
 historical-evidence, lifecycle-backend, Docker-source, compile, and formatting
 checks also passed locally.
 
-## Evidence boundary
+## Live follow-up and evidence boundary
 
-No real model was initialized or trained for this implementation result. PEFT
-loading, model compatibility, CUDA behavior, interruption handling, and final
-artifact equality remain unverified for the new path.
+Companion revision `02eca0556027355077e20c3b0fbe26963d6b8b13` subsequently
+published one real initial adapter and conditioned both an uninterrupted and an
+interrupted-resumed two-update RTX 3090 Ti process on its exact four-file tree.
+Evaluator 0.45 rehashed the tree, observed the interruption after update one,
+and found byte-identical final model, optimizer, scheduler, trainer, and RNG
+roles. The report passed at
+`byte_exact_live_conditioned_artifact_set`.
 
-The next qualifying experiment must create the initial adapter in one process,
-condition both an uninterrupted and an interrupted-resumed process on those
-same bytes, and preserve evaluator 0.45 schema 1.1 receipts. The interruption
-must be observed before the target update, and all five independently stored
-final artifact roles must be compared. A passing result would remain scoped to
-that dataset, model, seed, dependency stack, update schedule, interruption
-point, world size, and host. It would not prove perceptual quality, adaptation
-benefit, arbitrary continuation, or distributed equivalence.
+This qualifies the serialized publication, validation, explicit load route,
+and five-role artifact comparison for the exact tested configuration. The
+evaluator correctly records `proves_training_semantics: false` and
+`proves_model_quality: false`: it cannot independently inspect every trainer
+operation or hidden state, and no audio was generated. The result remains
+scoped to that dataset, model, seed, dependency stack, update schedule,
+interruption point, world size, and host. It does not prove perceptual quality,
+adaptation benefit, arbitrary continuation, or distributed equivalence.

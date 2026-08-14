@@ -466,10 +466,15 @@ configuration drift before model loading. The guarded lifecycle requires the
 same path through `TRAIN_INITIAL_ADAPTER_DIR`, binds its complete file tree at
 preflight, and forwards it to the trainer.
 
-This path establishes explicit initial adapter loading and content identity. It
-does not establish training equivalence or quality until a fresh evaluator
-0.45 run conditions both processes on the published bytes and compares their
-independently stored final artifacts.
+This path establishes explicit initial adapter loading and content identity.
+Companion revision `02eca0556027355077e20c3b0fbe26963d6b8b13` completed a
+bounded RTX 3090 Ti evaluator 0.45 pair using one published four-file adapter
+tree. After a real `SIGTERM` interruption and separate resume, all five final
+roles were byte-identical at
+`byte_exact_live_conditioned_artifact_set`. See
+[`reports/resume-serialized-initial-live-conditioned-gpu-2026-08-14.md`](reports/resume-serialized-initial-live-conditioned-gpu-2026-08-14.md).
+The evaluator still records `proves_training_semantics: false` and
+`proves_model_quality: false`; no audio was generated.
 
 ### Guarded LoRA interruption resume
 
