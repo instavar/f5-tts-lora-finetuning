@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.4.0-cuda12.4-cudnn9-devel
+FROM pytorch/pytorch:2.4.0-cuda12.4-cudnn9-devel@sha256:e96c6896ecfbb50d89c87bf94110206ef444f27268c5f72201eb29fba9c90331
 
 USER root
 

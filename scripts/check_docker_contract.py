@@ -19,6 +19,11 @@ def reject(source: str, needle: str, *, label: str) -> None:
 def main() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     workflow = (ROOT / ".github/workflows/publish-docker-image.yaml").read_text(encoding="utf-8")
+    require(
+        dockerfile,
+        "FROM pytorch/pytorch:2.4.0-cuda12.4-cudnn9-devel@sha256:",
+        label="Dockerfile",
+    )
     require(dockerfile, "COPY . .", label="Dockerfile")
     require(
         dockerfile,
