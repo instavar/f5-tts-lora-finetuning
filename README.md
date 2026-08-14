@@ -109,6 +109,11 @@ The Instavar image is built from this repository checkout and its pinned
 BigVGAN submodule. The OCI revision label records the exact companion commit;
 it does not clone an unpinned upstream head during the build.
 
+Registry publication is not the same as anonymous pull availability. On
+2026-08-14, an anonymous manifest request returned `unauthorized`, and the
+operator credential used for validation lacked the `read:packages` scope.
+Build locally until package visibility and an independent pull are verified.
+
 ```bash
 # Build from Dockerfile
 docker build -t f5tts:v1 .
