@@ -30,6 +30,16 @@ def main() -> None:
         "test -f src/third_party/BigVGAN/bigvgan.py",
         label="Dockerfile",
     )
+    require(
+        dockerfile,
+        "import f5_tts.train.lora_resume_contract",
+        label="Dockerfile",
+    )
+    require(
+        dockerfile,
+        "Path(f5_tts.__file__).resolve().is_relative_to(Path('/workspace/F5-TTS'))",
+        label="Dockerfile",
+    )
     require(dockerfile, "SOURCE_REVISION", label="Dockerfile")
     reject(dockerfile, "git clone https://github.com/SWivid/F5-TTS", label="Dockerfile")
     require(workflow, "submodules: recursive", label="Docker workflow")

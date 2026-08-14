@@ -23,7 +23,8 @@ COPY . .
 
 RUN test -f src/f5_tts/train/lora_resume_contract.py \
     && test -f src/third_party/BigVGAN/bigvgan.py \
-    && pip install -e . --no-cache-dir
+    && pip install -e . --no-cache-dir \
+    && python -c "from pathlib import Path; import f5_tts; import f5_tts.train.lora_resume_contract; assert Path(f5_tts.__file__).resolve().is_relative_to(Path('/workspace/F5-TTS'))"
 
 ENV SHELL=/bin/bash
 
