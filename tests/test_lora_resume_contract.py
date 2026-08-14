@@ -9,7 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from f5_tts.train.lora_resume_contract import (  # noqa: E402
+    OPTIMIZER_STATE_NAME,
     RUNTIME_STATE_NAME,
+    SCHEDULER_STATE_NAME,
     STATE_NAME,
     ResumeContractError,
     build_contract,
@@ -46,7 +48,7 @@ class LoRAResumeContractTest(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def checkpoint(self, completed_updates=4, data_epoch=1):
+    def checkpoint(self, completed_updates=4, data_epoch=1, include_evidence_states=True):
         checkpoint = self.output / f"lora_{completed_updates}"
         checkpoint.mkdir()
         for name, payload in {
@@ -56,6 +58,9 @@ class LoRAResumeContractTest(unittest.TestCase):
             RUNTIME_STATE_NAME: b"runtime",
         }.items():
             (checkpoint / name).write_bytes(payload)
+        if include_evidence_states:
+            (checkpoint / OPTIMIZER_STATE_NAME).write_bytes(b"optimizer-only")
+            (checkpoint / SCHEDULER_STATE_NAME).write_bytes(b"scheduler-only")
         (checkpoint / STATE_NAME).write_text(
             json.dumps(
                 {
@@ -66,17 +71,20 @@ class LoRAResumeContractTest(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        required_files = [
+            "adapter_config.json",
+            "adapter_model.safetensors",
+            "training_state.pt",
+            STATE_NAME,
+            RUNTIME_STATE_NAME,
+        ]
+        if include_evidence_states:
+            required_files.extend([OPTIMIZER_STATE_NAME, SCHEDULER_STATE_NAME])
         write_sidecar(
             checkpoint,
             contract=self.contract,
             completed_updates=completed_updates,
-            required_files=[
-                "adapter_config.json",
-                "adapter_model.safetensors",
-                "training_state.pt",
-                STATE_NAME,
-                RUNTIME_STATE_NAME,
-            ],
+            required_files=required_files,
         )
         return checkpoint
 
@@ -91,6 +99,31 @@ class LoRAResumeContractTest(unittest.TestCase):
         )
         self.assertEqual(resolved, checkpoint.resolve())
         self.assertEqual(state["completed_updates"], 4)
+
+    def test_legacy_checkpoint_without_decomposed_evidence_state_still_loads(self):
+        checkpoint = self.checkpoint(include_evidence_states=False)
+        resolved, state, sidecar = validate_checkpoint(
+            checkpoint,
+            output_dir=self.output,
+            expected_contract=self.contract,
+            trust_resume_state=True,
+            world_size=1,
+        )
+        self.assertEqual(resolved, checkpoint.resolve())
+        self.assertEqual(state["completed_updates"], 4)
+        self.assertNotIn(OPTIMIZER_STATE_NAME, sidecar["files"])
+
+    def test_decomposed_evidence_state_is_bound_by_sidecar(self):
+        checkpoint = self.checkpoint()
+        (checkpoint / OPTIMIZER_STATE_NAME).write_bytes(b"changed")
+        with self.assertRaisesRegex(ResumeContractError, "drift"):
+            validate_checkpoint(
+                checkpoint,
+                output_dir=self.output,
+                expected_contract=self.contract,
+                trust_resume_state=True,
+                world_size=1,
+            )
 
     def test_resume_requires_explicit_pickle_trust(self):
         with self.assertRaisesRegex(ResumeContractError, "trust_resume_state"):
@@ -257,6 +290,8 @@ class LoRATrainerSourceContractTest(unittest.TestCase):
     def test_lora_checkpoint_is_atomic_and_immutable(self):
         self.assertIn("Refusing to reuse unowned immutable LoRA checkpoint", self.trainer)
         self.assertIn('adapter_config["target_modules"] = sorted', self.trainer)
+        self.assertIn("torch.save(optimizer_state_dict", self.trainer)
+        self.assertIn("torch.save(scheduler_state_dict", self.trainer)
         self.assertIn("os.replace(lora_dir, final_dir)", self.trainer)
         self.assertIn("os.symlink(os.path.basename(final_dir)", self.trainer)
 

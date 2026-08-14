@@ -302,6 +302,7 @@
   "known_gaps": [
     "Separate inherited upstream runtime breadth from Instavar's LoRA-specific contribution in release notes.",
     "Guarded LoRA resume has one real epoch-boundary world-size-one comparison; mid-epoch, frame-batched, accumulated-gradient, sample-logging, stochastic-worker, distributed, and long-run equivalence remain untested.",
+    "The retained resume drill predates evaluator 0.45 schema 1.1 receipts; a fresh run must bind live Base, lineage, controls, and initial-state artifacts before receiving the stronger claim tier.",
     "Reproduce adapter-merged equivalence in Triton, MLX, or ONNX before promoting those runtimes.",
     "The exact base versus step-1250 comparison covers one long-form prompt and seed; multi-seed coverage and human ratings remain incomplete.",
     "Back up the qualified package to an independent remote system and reproduce restore on a second host before making a disaster-recovery claim."

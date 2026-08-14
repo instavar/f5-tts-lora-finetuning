@@ -460,6 +460,21 @@ real interruption. See
 [`reports/interrupted-resume-gpu-2026-08-14.md`](reports/interrupted-resume-gpu-2026-08-14.md)
 for the exact scope and exclusions.
 
+Future checkpoints also write sidecar-bound `optimizer-state.pt` and
+`scheduler-state.pt` files. Together with `adapter_model.safetensors`,
+`training-state.json`, and `runtime-state.pt`, they expose the five independent
+semantic roles required by Instavar Voice evaluator 0.45 resume comparison.
+The loader still accepts older guarded checkpoints that contain only the
+combined `training_state.pt`; adding evidence files does not invalidate those
+resume authorities.
+
+This instrumentation does not upgrade the retained GPU drill. That run
+predates schema 1.1 live-conditioning receipts. A fresh comparison must
+preregister and fingerprint the Base artifact, dataset-lineage receipt,
+training controls, and initial state, then build both run receipts before the
+outcome is inspected. See
+[`reports/resume-evaluator-045-instrumentation-2026-08-14.md`](reports/resume-evaluator-045-instrumentation-2026-08-14.md).
+
 ### Target Modules
 
 The default targets the attention Q/K/V/O projections in the DiT transformer blocks. You can also include the feedforward layers:
@@ -517,7 +532,7 @@ Our code is released under MIT License. The pre-trained models are licensed unde
 
 ## Instavar Voice conformance
 
-[`instavar-voice-capabilities.json`](instavar-voice-capabilities.json) separates the Instavar LoRA path from inherited upstream training, evaluation, and runtime surfaces. It keeps Triton TensorRT-LLM, MLX, and ONNX visible without claiming adapter equivalence that has not been reproduced. CI validates the manifest against the pinned public [Instavar Voice evaluation contract](https://github.com/instavar/instavar-voice-evaluation). New lifecycle runs should use evaluator commit `8c0fb66a592c73f801a289aabd242e03a6849115` or a deliberately reviewed successor so POSIX stage timeouts clean the complete process group. This does not retroactively upgrade earlier run evidence.
+[`instavar-voice-capabilities.json`](instavar-voice-capabilities.json) separates the Instavar LoRA path from inherited upstream training, evaluation, and runtime surfaces. It keeps Triton TensorRT-LLM, MLX, and ONNX visible without claiming adapter equivalence that has not been reproduced. CI validates the manifest against the pinned public [Instavar Voice evaluation contract](https://github.com/instavar/instavar-voice-evaluation). New lifecycle and resume-evidence runs should use evaluator commit `29c38cfd86b889abc8b79df063c817dd8f684903` or a deliberately reviewed successor so POSIX stage timeouts clean the complete process group and schema 1.1 receipts bind live conditioning artifacts. This does not retroactively upgrade earlier run evidence.
 
 The lifecycle preserves invalid generations as explicit rows, then uses
 evaluator revision `8feadf7bbda75abe1c305c63e362c41b86451cda` to bind timing,

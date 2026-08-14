@@ -14,6 +14,8 @@ SCHEMA_VERSION = "1.0.0"
 SIDECAR_NAME = "resume-contract.json"
 STATE_NAME = "training-state.json"
 RUNTIME_STATE_NAME = "runtime-state.pt"
+OPTIMIZER_STATE_NAME = "optimizer-state.pt"
+SCHEDULER_STATE_NAME = "scheduler-state.pt"
 _CHECKPOINT_RE = re.compile(r"^lora_(\d+)$")
 
 

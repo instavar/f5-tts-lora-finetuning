@@ -23,7 +23,9 @@ from f5_tts.model import CFM
 from f5_tts.model.dataset import DynamicBatchSampler, EpochRandomSampler, collate_fn
 from f5_tts.model.utils import default, exists
 from f5_tts.train.lora_resume_contract import (
+    OPTIMIZER_STATE_NAME,
     RUNTIME_STATE_NAME,
+    SCHEDULER_STATE_NAME,
     STATE_NAME,
     prunable_checkpoints,
     validate_checkpoint,
@@ -202,15 +204,19 @@ class Trainer:
                     with open(adapter_config_path, "w", encoding="utf-8") as handle:
                         json.dump(adapter_config, handle, ensure_ascii=False, indent=2, sort_keys=True)
                         handle.write("\n")
+                    optimizer_state_dict = self.optimizer.state_dict()
+                    scheduler_state_dict = self.scheduler.state_dict()
                     training_state_path = os.path.join(lora_dir, "training_state.pt")
                     torch.save(
                         dict(
-                            optimizer_state_dict=self.optimizer.state_dict(),
-                            scheduler_state_dict=self.scheduler.state_dict(),
+                            optimizer_state_dict=optimizer_state_dict,
+                            scheduler_state_dict=scheduler_state_dict,
                             update=update,
                         ),
                         training_state_path,
                     )
+                    torch.save(optimizer_state_dict, os.path.join(lora_dir, OPTIMIZER_STATE_NAME))
+                    torch.save(scheduler_state_dict, os.path.join(lora_dir, SCHEDULER_STATE_NAME))
                     scaler_state = (
                         self.accelerator.scaler.state_dict()
                         if self.accelerator.scaler is not None and hasattr(self.accelerator.scaler, "state_dict")
@@ -248,6 +254,8 @@ class Trainer:
                             "adapter_config.json",
                             "adapter_model.safetensors",
                             "training_state.pt",
+                            OPTIMIZER_STATE_NAME,
+                            SCHEDULER_STATE_NAME,
                             STATE_NAME,
                             RUNTIME_STATE_NAME,
                         ],
