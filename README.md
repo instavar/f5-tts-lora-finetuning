@@ -517,7 +517,7 @@ Our code is released under MIT License. The pre-trained models are licensed unde
 
 ## Instavar Voice conformance
 
-[`instavar-voice-capabilities.json`](instavar-voice-capabilities.json) separates the Instavar LoRA path from inherited upstream training, evaluation, and runtime surfaces. It keeps Triton TensorRT-LLM, MLX, and ONNX visible without claiming adapter equivalence that has not been reproduced. CI validates the manifest against the pinned public [Instavar Voice evaluation contract](https://github.com/instavar/instavar-voice-evaluation).
+[`instavar-voice-capabilities.json`](instavar-voice-capabilities.json) separates the Instavar LoRA path from inherited upstream training, evaluation, and runtime surfaces. It keeps Triton TensorRT-LLM, MLX, and ONNX visible without claiming adapter equivalence that has not been reproduced. CI validates the manifest against the pinned public [Instavar Voice evaluation contract](https://github.com/instavar/instavar-voice-evaluation). New lifecycle runs should use evaluator commit `8c0fb66a592c73f801a289aabd242e03a6849115` or a deliberately reviewed successor so POSIX stage timeouts clean the complete process group. This does not retroactively upgrade earlier run evidence.
 
 The lifecycle preserves invalid generations as explicit rows, then uses
 evaluator revision `8feadf7bbda75abe1c305c63e362c41b86451cda` to bind timing,
