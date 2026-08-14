@@ -471,11 +471,18 @@ The loader still accepts older guarded checkpoints that contain only the
 combined `training_state.pt`; adding evidence files does not invalidate those
 resume authorities.
 
-This instrumentation does not upgrade the retained GPU drill. That run
-predates schema 1.1 live-conditioning receipts. A fresh comparison must
-preregister and fingerprint the Base artifact, dataset-lineage receipt,
-training controls, and initial state, then build both run receipts before the
-outcome is inspected. See
+Public main `fbea10f5aae769e0f7f01dce5ff1aab69b6ea8bc` subsequently completed a
+fresh two-update RTX 3090 Ti comparison with evaluator 0.45. A real SIGTERM
+interruption after `lora_1` left no `lora_2` or partial directory, and a fresh
+process resumed to `lora_2`. The mapper and evaluator rehashed all five final
+roles; every role was byte-identical and the report reached
+`byte_exact_live_conditioned_artifact_set`. The conditioning `initial_state`
+is a deterministic initialization contract, not a saved live initial adapter,
+and the evaluator explicitly leaves training semantics and quality unproved.
+See
+[`reports/resume-live-conditioned-gpu-2026-08-14.md`](reports/resume-live-conditioned-gpu-2026-08-14.md)
+for the retained hashes, exact scope, and remaining gaps. Instrumentation detail
+remains in
 [`reports/resume-evaluator-045-instrumentation-2026-08-14.md`](reports/resume-evaluator-045-instrumentation-2026-08-14.md).
 
 ### Target Modules

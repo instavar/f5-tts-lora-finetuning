@@ -53,6 +53,11 @@
               "level": "smoke_tested",
               "ref": "reports/interrupted-resume-gpu-2026-08-14.md",
               "claim": "A real world-size-one epoch-boundary interruption and separate resume produced byte-identical final adapter, optimizer, scheduler, logical state, and Python, NumPy, Torch, CUDA, and scaler continuation artifacts; the lifecycle-owned resume route matched the uninterrupted checkpoint."
+            },
+            {
+              "level": "smoke_tested",
+              "ref": "reports/resume-live-conditioned-gpu-2026-08-14.md",
+              "claim": "A fresh evaluator 0.45 GPU pair bound live conditioning receipts and compared five sidecar-validated final roles byte-exactly after a real process interruption and separate resume."
             }
           ],
           "boundary": "The real comparison covers one tiny sample-batched epoch-boundary world-size-one run. Mid-epoch, frame-batched, accumulated-gradient, sample-logging, stochastic-worker, distributed, long-run, and quality equivalence remain untested; saved continuation state remains separate from a promoted release package."
@@ -302,7 +307,7 @@
   "known_gaps": [
     "Separate inherited upstream runtime breadth from Instavar's LoRA-specific contribution in release notes.",
     "Guarded LoRA resume has one real epoch-boundary world-size-one comparison; mid-epoch, frame-batched, accumulated-gradient, sample-logging, stochastic-worker, distributed, and long-run equivalence remain untested.",
-    "The retained resume drill predates evaluator 0.45 schema 1.1 receipts; a fresh run must bind live Base, lineage, controls, and initial-state artifacts before receiving the stronger claim tier.",
+    "The evaluator 0.45 GPU pair reached the live-conditioned artifact tier, but initial_state is a deterministic initialization contract rather than a saved live initial adapter and the evaluator does not prove runtime loading or training semantics.",
     "Reproduce adapter-merged equivalence in Triton, MLX, or ONNX before promoting those runtimes.",
     "The exact base versus step-1250 comparison covers one long-form prompt and seed; multi-seed coverage and human ratings remain incomplete.",
     "Back up the qualified package to an independent remote system and reproduce restore on a second host before making a disaster-recovery claim."
