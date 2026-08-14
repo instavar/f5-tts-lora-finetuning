@@ -1,0 +1,6 @@
+accelerate==1.11.0
+peft==0.18.1
+torch==2.9.0
+torchaudio==2.9.0
+torchcodec==0.8.1
+transformers==4.57.1

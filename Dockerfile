@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.4.0-cuda12.4-cudnn9-devel@sha256:e96c6896ecfbb50d89c87bf94110206ef444f27268c5f72201eb29fba9c90331
+FROM pytorch/pytorch:2.9.0-cuda12.8-cudnn9-devel@sha256:97ec2a667dd7560c615bf50a95b2fb85a673ae233a55da1706e8e04e6d6d518e
 
 USER root
 
@@ -23,8 +23,8 @@ COPY . .
 
 RUN test -f src/f5_tts/train/lora_resume_contract.py \
     && test -f src/third_party/BigVGAN/bigvgan.py \
-    && pip install -e . --no-cache-dir \
-    && python -c "from pathlib import Path; import f5_tts; import f5_tts.train.lora_resume_contract; assert Path(f5_tts.__file__).resolve().is_relative_to(Path('/workspace/F5-TTS'))"
+    && pip install -e . --no-cache-dir --constraint docker-constraints.txt \
+    && python -c "from importlib.metadata import version; from pathlib import Path; import f5_tts.train.lora_resume_contract as contract; expected = {'torch': '2.9.0', 'torchaudio': '2.9.0', 'torchcodec': '0.8.1', 'transformers': '4.57.1', 'peft': '0.18.1', 'accelerate': '1.11.0'}; assert {name: version(name) for name in expected} == expected; assert Path(contract.__file__).resolve().is_relative_to(Path('/workspace/F5-TTS'))"
 
 ENV SHELL=/bin/bash
 
