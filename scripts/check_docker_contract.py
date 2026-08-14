@@ -57,9 +57,7 @@ def main() -> None:
         "pyarrow==22.0.0",
     ):
         require(constraints, dependency, label="Docker constraints")
-    runtime_check = (ROOT / "scripts/check_container_runtime.py").read_text(
-        encoding="utf-8"
-    )
+    runtime_check = (ROOT / "scripts/check_container_runtime.py").read_text(encoding="utf-8")
     require(
         runtime_check,
         "import f5_tts.train.lora_resume_contract as resume_contract",

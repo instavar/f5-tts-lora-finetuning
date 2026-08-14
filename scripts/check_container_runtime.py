@@ -27,17 +27,11 @@ EXPECTED_SOURCE_ROOT = Path("/workspace/F5-TTS")
 def main() -> None:
     actual_versions = {name: version(name) for name in EXPECTED_VERSIONS}
     if actual_versions != EXPECTED_VERSIONS:
-        raise SystemExit(
-            "container dependency drift: "
-            f"expected={EXPECTED_VERSIONS!r} actual={actual_versions!r}"
-        )
+        raise SystemExit(f"container dependency drift: expected={EXPECTED_VERSIONS!r} actual={actual_versions!r}")
 
     contract_path = Path(resume_contract.__file__).resolve()
     if not contract_path.is_relative_to(EXPECTED_SOURCE_ROOT):
-        raise SystemExit(
-            "container imported the resume contract outside the owned checkout: "
-            f"{contract_path}"
-        )
+        raise SystemExit(f"container imported the resume contract outside the owned checkout: {contract_path}")
 
 
 if __name__ == "__main__":
