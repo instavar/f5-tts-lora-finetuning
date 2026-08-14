@@ -68,6 +68,8 @@ def main() -> None:
         'EXPECTED_SOURCE_ROOT = Path("/workspace/F5-TTS")',
         label="Container runtime check",
     )
+    for dependency in ('"torch": "2.9.0+cu128"', '"torchaudio": "2.9.0+cu128"'):
+        require(runtime_check, dependency, label="Container runtime check")
     require(dockerfile, "SOURCE_REVISION", label="Dockerfile")
     reject(dockerfile, "git clone https://github.com/SWivid/F5-TTS", label="Dockerfile")
     require(workflow, "submodules: recursive", label="Docker workflow")

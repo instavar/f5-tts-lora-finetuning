@@ -16,8 +16,8 @@ EXPECTED_VERSIONS = {
     "numpy": "1.26.4",
     "peft": "0.18.1",
     "pyarrow": "22.0.0",
-    "torch": "2.9.0",
-    "torchaudio": "2.9.0",
+    "torch": "2.9.0+cu128",
+    "torchaudio": "2.9.0+cu128",
     "torchcodec": "0.8.1",
     "transformers": "4.57.1",
 }
