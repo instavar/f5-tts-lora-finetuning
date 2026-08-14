@@ -428,8 +428,48 @@ equivalence, perceptual quality, distribution rights, or production readiness.
 | `--lora_dropout` | `0.0` | Dropout on LoRA layers (0.0 recommended for small datasets) |
 | `--seed` | `666` | Seed Python, NumPy, Torch, CUDA, epoch-addressable data order, and the guarded resume contract |
 | `--lora_target_modules` | `to_q to_k to_v to_out.0` | Which layers to apply LoRA to |
+| `--initial_adapter_dir` | empty | Exact immutable initial PEFT adapter loaded and content-bound before training |
+| `--publish_initial_adapter` | empty | Absolute no-overwrite destination for publishing seeded initial adapter bytes, then exiting |
+| `--producer_revision` | empty | Lowercase 40-character companion commit required by initial-adapter publication |
 | `--resume_from` | empty | Exact immutable `lora_N` directory to resume; never auto-selected |
 | `--trust_resume_state` | `False` | Explicitly trust PyTorch optimizer and runtime state for resume |
+
+### Serialized initial adapter for paired runs
+
+Create one immutable initial adapter before starting uninterrupted and
+interrupted-resumed conditions. The command uses the same model construction,
+base checkpoint loader, seed, and LoRA configuration as training, writes safe
+serialized PEFT weights to a temporary sibling, records a byte-hashed receipt,
+fsyncs the tree, and publishes it without overwrite:
+
+```bash
+python src/f5_tts/train/finetune_cli.py \
+  --exp_name F5TTS_v1_Base \
+  --dataset_name <prepared-dataset-name> \
+  --tokenizer pinyin \
+  --finetune \
+  --pretrain /absolute/path/model_1250000.safetensors \
+  --lora \
+  --lora_rank 8 \
+  --lora_alpha 16 \
+  --lora_dropout 0 \
+  --lora_target_modules to_q to_k to_v to_out.0 \
+  --seed 42 \
+  --publish_initial_adapter /absolute/path/initial-adapter \
+  --producer_revision <lowercase-40-character-companion-commit>
+```
+
+Pass the same directory to every condition with
+`--initial_adapter_dir /absolute/path/initial-adapter`. The trainer rejects
+symlinks, hardlinked files, unsafe or missing weights, receipt drift, and LoRA
+configuration drift before model loading. The guarded lifecycle requires the
+same path through `TRAIN_INITIAL_ADAPTER_DIR`, binds its complete file tree at
+preflight, and forwards it to the trainer.
+
+This path establishes explicit initial adapter loading and content identity. It
+does not establish training equivalence or quality until a fresh evaluator
+0.45 run conditions both processes on the published bytes and compares their
+independently stored final artifacts.
 
 ### Guarded LoRA interruption resume
 

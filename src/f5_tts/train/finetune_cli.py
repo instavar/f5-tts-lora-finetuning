@@ -12,6 +12,7 @@ from cached_path import cached_path
 from f5_tts.model import CFM, DiT, Trainer, UNetT
 from f5_tts.model.dataset import load_dataset
 from f5_tts.model.utils import get_tokenizer, seed_everything
+from f5_tts.train.lora_initial_adapter import publish_initial_adapter, validate_initial_adapter_config
 from f5_tts.train.lora_resume_contract import build_contract, require_fresh_output
 
 
@@ -114,6 +115,24 @@ def parse_args():
         action="store_true",
         help="Acknowledge that trusted PyTorch optimizer state will be deserialized.",
     )
+    parser.add_argument(
+        "--initial_adapter_dir",
+        type=str,
+        default="",
+        help="Exact immutable initial PEFT adapter to load and bind before LoRA training.",
+    )
+    parser.add_argument(
+        "--publish_initial_adapter",
+        type=str,
+        default="",
+        help="Publish the seeded initial PEFT adapter atomically to this absolute path, then exit.",
+    )
+    parser.add_argument(
+        "--producer_revision",
+        type=str,
+        default="",
+        help="Exact lowercase Git revision required when publishing an initial adapter.",
+    )
 
     return parser.parse_args()
 
@@ -130,6 +149,18 @@ def main():
         raise ValueError("Guarded resume_from is supported only for the Instavar LoRA path")
     if args.trust_resume_state and not args.resume_from:
         raise ValueError("trust_resume_state requires an explicit resume_from checkpoint")
+    if args.initial_adapter_dir and not args.lora:
+        raise ValueError("initial_adapter_dir is supported only for the Instavar LoRA path")
+    if args.publish_initial_adapter and not args.lora:
+        raise ValueError("publish_initial_adapter requires the Instavar LoRA path")
+    if args.publish_initial_adapter and args.initial_adapter_dir:
+        raise ValueError("publish_initial_adapter and initial_adapter_dir are mutually exclusive")
+    if args.publish_initial_adapter and args.resume_from:
+        raise ValueError("publish_initial_adapter cannot resume training")
+    if args.publish_initial_adapter and not args.producer_revision:
+        raise ValueError("publish_initial_adapter requires producer_revision")
+    if args.producer_revision and not args.publish_initial_adapter:
+        raise ValueError("producer_revision is accepted only with publish_initial_adapter")
     if args.lora and not args.finetune:
         raise ValueError("LoRA training requires --finetune so the base checkpoint is explicit and bound")
     if not 0 <= args.seed <= 2**63 - 1:
@@ -191,7 +222,7 @@ def main():
             else:
                 ckpt_path = args.pretrain
 
-    if args.finetune:
+    if args.finetune and not args.publish_initial_adapter:
         if not os.path.isdir(checkpoint_path):
             os.makedirs(checkpoint_path, exist_ok=True)
 
@@ -204,54 +235,70 @@ def main():
             print("copy checkpoint for finetune")
 
     if args.lora:
-        Path(checkpoint_path).resolve(strict=True)
-        if not args.resume_from:
-            require_fresh_output(checkpoint_path)
-        dataset_root = Path(str(files("f5_tts").joinpath(f"../../data/{args.dataset_name}_{args.tokenizer}")))
-        resume_contract = build_contract(
-            output_dir=checkpoint_path,
-            base_checkpoint=ckpt_path,
-            dataset_root=dataset_root,
-            optional_files={"tokenizer": args.tokenizer_path if args.tokenizer == "custom" else None},
-            source_files=[
-                Path(__file__),
-                Path(__file__).with_name("lora_resume_contract.py"),
-                Path(__file__).parents[1] / "model" / "trainer.py",
-                Path(__file__).parents[1] / "model" / "dataset.py",
-                Path(__file__).parents[1] / "model" / "cfm.py",
-            ],
-            training_config={
-                "exp_name": args.exp_name,
-                "dataset_name": args.dataset_name,
-                "tokenizer": args.tokenizer,
-                "learning_rate": args.learning_rate,
-                "batch_size_per_gpu": args.batch_size_per_gpu,
-                "batch_size_type": args.batch_size_type,
-                "max_samples": args.max_samples,
-                "grad_accumulation_steps": args.grad_accumulation_steps,
-                "max_grad_norm": args.max_grad_norm,
-                "epochs": args.epochs,
-                "seed": args.seed,
-                "num_warmup_updates": args.num_warmup_updates,
-                "save_per_updates": args.save_per_updates,
-                "last_per_updates": args.last_per_updates,
-                "keep_last_n_checkpoints": args.keep_last_n_checkpoints,
-                "bnb_optimizer": args.bnb_optimizer,
-                "lora_rank": args.lora_rank,
-                "lora_alpha": args.lora_alpha,
-                "lora_dropout": args.lora_dropout,
-                "lora_target_modules": args.lora_target_modules,
-                "shuffle_seed": args.seed,
-            },
-            runtime={
-                "python": platform.python_version(),
-                "torch": importlib.metadata.version("torch"),
-                "accelerate": importlib.metadata.version("accelerate"),
-                "peft": importlib.metadata.version("peft"),
-                "cuda": torch.version.cuda,
-                "world_size": int(os.environ.get("WORLD_SIZE", "1")),
-            },
+        initial_adapter_dir = (
+            Path(args.initial_adapter_dir).expanduser().resolve(strict=True) if args.initial_adapter_dir else None
         )
+        if initial_adapter_dir:
+            validate_initial_adapter_config(
+                initial_adapter_dir,
+                rank=args.lora_rank,
+                alpha=args.lora_alpha,
+                dropout=args.lora_dropout,
+                target_modules=args.lora_target_modules,
+            )
+        if args.publish_initial_adapter:
+            resume_contract = None
+        else:
+            Path(checkpoint_path).resolve(strict=True)
+            if not args.resume_from:
+                require_fresh_output(checkpoint_path)
+            dataset_root = Path(str(files("f5_tts").joinpath(f"../../data/{args.dataset_name}_{args.tokenizer}")))
+            resume_contract = build_contract(
+                output_dir=checkpoint_path,
+                base_checkpoint=ckpt_path,
+                dataset_root=dataset_root,
+                optional_files={"tokenizer": args.tokenizer_path if args.tokenizer == "custom" else None},
+                initial_adapter_dir=initial_adapter_dir,
+                source_files=[
+                    Path(__file__),
+                    Path(__file__).with_name("lora_initial_adapter.py"),
+                    Path(__file__).with_name("lora_resume_contract.py"),
+                    Path(__file__).parents[1] / "model" / "trainer.py",
+                    Path(__file__).parents[1] / "model" / "dataset.py",
+                    Path(__file__).parents[1] / "model" / "cfm.py",
+                ],
+                training_config={
+                    "exp_name": args.exp_name,
+                    "dataset_name": args.dataset_name,
+                    "tokenizer": args.tokenizer,
+                    "learning_rate": args.learning_rate,
+                    "batch_size_per_gpu": args.batch_size_per_gpu,
+                    "batch_size_type": args.batch_size_type,
+                    "max_samples": args.max_samples,
+                    "grad_accumulation_steps": args.grad_accumulation_steps,
+                    "max_grad_norm": args.max_grad_norm,
+                    "epochs": args.epochs,
+                    "seed": args.seed,
+                    "num_warmup_updates": args.num_warmup_updates,
+                    "save_per_updates": args.save_per_updates,
+                    "last_per_updates": args.last_per_updates,
+                    "keep_last_n_checkpoints": args.keep_last_n_checkpoints,
+                    "bnb_optimizer": args.bnb_optimizer,
+                    "lora_rank": args.lora_rank,
+                    "lora_alpha": args.lora_alpha,
+                    "lora_dropout": args.lora_dropout,
+                    "lora_target_modules": args.lora_target_modules,
+                    "shuffle_seed": args.seed,
+                },
+                runtime={
+                    "python": platform.python_version(),
+                    "torch": importlib.metadata.version("torch"),
+                    "accelerate": importlib.metadata.version("accelerate"),
+                    "peft": importlib.metadata.version("peft"),
+                    "cuda": torch.version.cuda,
+                    "world_size": int(os.environ.get("WORLD_SIZE", "1")),
+                },
+            )
     else:
         resume_contract = None
 
@@ -287,7 +334,7 @@ def main():
 
     # Apply LoRA if requested
     if args.lora:
-        from peft import LoraConfig, get_peft_model
+        from peft import LoraConfig, PeftModel, get_peft_model
 
         # Load pretrained base weights BEFORE applying LoRA
         # (Trainer.load_checkpoint handles this for non-LoRA, but PeftModel wrapping changes state_dict keys)
@@ -301,15 +348,33 @@ def main():
         for param in model.parameters():
             param.requires_grad = False
 
-        lora_config = LoraConfig(
-            r=args.lora_rank,
-            lora_alpha=args.lora_alpha,
-            lora_dropout=args.lora_dropout,
-            target_modules=args.lora_target_modules,
-            bias="none",
-        )
-        model = get_peft_model(model, lora_config)
+        if initial_adapter_dir:
+            model = PeftModel.from_pretrained(model, initial_adapter_dir, is_trainable=True)
+        else:
+            lora_config = LoraConfig(
+                r=args.lora_rank,
+                lora_alpha=args.lora_alpha,
+                lora_dropout=args.lora_dropout,
+                target_modules=args.lora_target_modules,
+                bias="none",
+            )
+            model = get_peft_model(model, lora_config)
         model.print_trainable_parameters()
+
+        if args.publish_initial_adapter:
+            published = publish_initial_adapter(
+                model,
+                args.publish_initial_adapter,
+                producer_revision=args.producer_revision,
+                base_checkpoint=ckpt_path,
+                seed=args.seed,
+                rank=args.lora_rank,
+                alpha=args.lora_alpha,
+                dropout=args.lora_dropout,
+                target_modules=args.lora_target_modules,
+            )
+            print(f"Published immutable initial adapter: {published}")
+            return
 
     trainer = Trainer(
         model,

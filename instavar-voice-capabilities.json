@@ -50,6 +50,11 @@
               "claim": "Dependency-free tests cover explicit trusted numbered resume, immutable atomic checkpoint publication, data and runtime binding, epoch-addressable sample order, post-replay RNG restoration, and ownership-safe retention pruning."
             },
             {
+              "level": "repository_declared",
+              "ref": "tests/test_initial_adapter_contract.py",
+              "claim": "Dependency-free tests cover atomic no-overwrite initial-adapter publication, live file and receipt identity, explicit trainer loading, LoRA configuration matching, and symlink and hardlink rejection."
+            },
+            {
               "level": "smoke_tested",
               "ref": "reports/interrupted-resume-gpu-2026-08-14.md",
               "claim": "A real world-size-one epoch-boundary interruption and separate resume produced byte-identical final adapter, optimizer, scheduler, logical state, and Python, NumPy, Torch, CUDA, and scaler continuation artifacts; the lifecycle-owned resume route matched the uninterrupted checkpoint."
@@ -307,7 +312,7 @@
   "known_gaps": [
     "Separate inherited upstream runtime breadth from Instavar's LoRA-specific contribution in release notes.",
     "Guarded LoRA resume has one real epoch-boundary world-size-one comparison; mid-epoch, frame-batched, accumulated-gradient, sample-logging, stochastic-worker, distributed, and long-run equivalence remain untested.",
-    "The evaluator 0.45 GPU pair reached the live-conditioned artifact tier, but initial_state is a deterministic initialization contract rather than a saved live initial adapter and the evaluator does not prove runtime loading or training semantics.",
+    "The repository can now publish, bind, and explicitly load a serialized initial adapter, but no fresh evaluator 0.45 GPU pair has used that path; the earlier deterministic-initialization result does not prove the new runtime loading path or training semantics.",
     "Reproduce adapter-merged equivalence in Triton, MLX, or ONNX before promoting those runtimes.",
     "The exact base versus step-1250 comparison covers one long-form prompt and seed; multi-seed coverage and human ratings remain incomplete.",
     "Back up the qualified package to an independent remote system and reproduce restore on a second host before making a disaster-recovery claim."

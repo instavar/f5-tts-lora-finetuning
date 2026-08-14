@@ -9,6 +9,8 @@ import re
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from f5_tts.train.lora_initial_adapter import initial_adapter_identity
+
 
 SCHEMA_VERSION = "1.0.0"
 SIDECAR_NAME = "resume-contract.json"
@@ -77,6 +79,7 @@ def build_contract(
     base_checkpoint: str | Path,
     dataset_root: str | Path,
     optional_files: Mapping[str, str | Path | None],
+    initial_adapter_dir: str | Path | None = None,
     source_files: Iterable[str | Path],
     training_config: Mapping[str, Any],
     runtime: Mapping[str, Any],
@@ -92,6 +95,7 @@ def build_contract(
         "optional_files": {
             name: file_identity(path) for name, path in sorted(optional_files.items()) if path is not None and str(path)
         },
+        "initial_adapter": initial_adapter_identity(initial_adapter_dir) if initial_adapter_dir else None,
         "sources": [file_identity(path) for path in sorted((Path(path) for path in source_files), key=str)],
         "training_config": dict(training_config),
         "runtime": dict(runtime),

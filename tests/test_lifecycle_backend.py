@@ -96,6 +96,7 @@ class LifecycleBackendTests(unittest.TestCase):
         self.assertEqual(spec["capability_binding"]["adaptation"], "lora")
         required = {item["name"] for item in spec["required_environment"]}
         self.assertIn("PERSISTED_PACKAGE_ROOT", required)
+        self.assertIn("TRAIN_INITIAL_ADAPTER_DIR", required)
         self.assertIn("VOCODER_DIR", required)
         self.assertIn("package/persisted-package.json", spec["expected_artifacts"]["package"])
         for stage in ("preflight", "train", "infer", "evaluate", "package"):
@@ -131,9 +132,14 @@ class LifecycleBackendTests(unittest.TestCase):
                 paths[name] = path
             vocoder = root / "vocoder"
             self._write_vocoder(vocoder)
+            initial_adapter = root / "initial-adapter"
+            initial_adapter.mkdir()
+            (initial_adapter / "adapter_config.json").write_text("{}\n", encoding="utf-8")
+            (initial_adapter / "adapter_model.safetensors").write_bytes(b"initial")
             environment = {
                 "INSTAVAR_VOICE_WORK_DIR": str(work),
                 "BASE_MODEL_CHECKPOINT": str(paths["base"]),
+                "TRAIN_INITIAL_ADAPTER_DIR": str(initial_adapter),
                 "DATASET_LINEAGE": str(paths["lineage"]),
                 "INSTAVAR_VOICE_EXPERIMENT_MANIFEST": str(paths["experiment"]),
                 "GENERATION_PLAN": str(paths["plan"]),
@@ -166,6 +172,10 @@ class LifecycleBackendTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "inputs or controls changed"):
                     LIFECYCLE._verified_preflight()
                 paths["plan"].write_bytes(b"plan\n")
+                (initial_adapter / "adapter_model.safetensors").write_bytes(b"changed")
+                with self.assertRaisesRegex(ValueError, "inputs or controls changed"):
+                    LIFECYCLE._verified_preflight()
+                (initial_adapter / "adapter_model.safetensors").write_bytes(b"initial")
                 os.environ["EPOCHS"] = "21"
                 with self.assertRaisesRegex(ValueError, "inputs or controls changed"):
                     LIFECYCLE._verified_preflight()
@@ -223,6 +233,8 @@ class LifecycleBackendTests(unittest.TestCase):
     def test_lifecycle_launches_accelerate_through_current_python(self) -> None:
         source = (ROOT / "scripts" / "instavar_voice_lifecycle.py").read_text(encoding="utf-8")
         self.assertIn('"accelerate.commands.launch"', source)
+        self.assertIn('"TRAIN_INITIAL_ADAPTER_DIR"', source)
+        self.assertIn('"--initial_adapter_dir"', source)
         self.assertNotIn('[\n        "accelerate",\n        "launch",', source)
 
     def test_inference_cli_accepts_only_explicit_local_vocoder_mode(self) -> None:
