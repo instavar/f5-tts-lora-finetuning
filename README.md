@@ -464,6 +464,9 @@ Future checkpoints also write sidecar-bound `optimizer-state.pt` and
 `scheduler-state.pt` files. Together with `adapter_model.safetensors`,
 `training-state.json`, and `runtime-state.pt`, they expose the five independent
 semantic roles required by Instavar Voice evaluator 0.45 resume comparison.
+Use `evaluator_lora_artifact_paths(...)` to revalidate the checkpoint sidecar
+and map those exact five files. The mapper rejects legacy incomplete evidence,
+content drift, terminal symlinks, unsafe members, and cross-role hardlinks.
 The loader still accepts older guarded checkpoints that contain only the
 combined `training_state.pt`; adding evidence files does not invalidate those
 resume authorities.

@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -12,9 +13,11 @@ from f5_tts.train.lora_resume_contract import (  # noqa: E402
     OPTIMIZER_STATE_NAME,
     RUNTIME_STATE_NAME,
     SCHEDULER_STATE_NAME,
+    SIDECAR_NAME,
     STATE_NAME,
     ResumeContractError,
     build_contract,
+    evaluator_lora_artifact_paths,
     prunable_checkpoints,
     require_fresh_output,
     validate_checkpoint,
@@ -124,6 +127,50 @@ class LoRAResumeContractTest(unittest.TestCase):
                 trust_resume_state=True,
                 world_size=1,
             )
+
+    def test_evaluator_maps_five_live_state_roles(self):
+        checkpoint = self.checkpoint()
+        self.assertEqual(
+            {role: path.name for role, path in evaluator_lora_artifact_paths(checkpoint).items()},
+            {
+                "model_state": "adapter_model.safetensors",
+                "optimizer_state": OPTIMIZER_STATE_NAME,
+                "scheduler_state": SCHEDULER_STATE_NAME,
+                "trainer_state": STATE_NAME,
+                "rng_state": RUNTIME_STATE_NAME,
+            },
+        )
+
+    def test_evaluator_rejects_legacy_and_mutated_state(self):
+        legacy = self.checkpoint(completed_updates=3, include_evidence_states=False)
+        with self.assertRaisesRegex(ResumeContractError, "omits roles"):
+            evaluator_lora_artifact_paths(legacy)
+        checkpoint = self.checkpoint(completed_updates=5)
+        (checkpoint / OPTIMIZER_STATE_NAME).write_bytes(b"changed")
+        with self.assertRaisesRegex(ResumeContractError, "drift"):
+            evaluator_lora_artifact_paths(checkpoint)
+
+    def test_evaluator_rejects_cross_role_hardlinks(self):
+        checkpoint = self.checkpoint(completed_updates=6)
+        (checkpoint / SIDECAR_NAME).unlink()
+        (checkpoint / SCHEDULER_STATE_NAME).unlink()
+        os.link(checkpoint / OPTIMIZER_STATE_NAME, checkpoint / SCHEDULER_STATE_NAME)
+        write_sidecar(
+            checkpoint,
+            contract=self.contract,
+            completed_updates=6,
+            required_files=[
+                "adapter_config.json",
+                "adapter_model.safetensors",
+                "training_state.pt",
+                STATE_NAME,
+                RUNTIME_STATE_NAME,
+                OPTIMIZER_STATE_NAME,
+                SCHEDULER_STATE_NAME,
+            ],
+        )
+        with self.assertRaisesRegex(ResumeContractError, "hardlinks"):
+            evaluator_lora_artifact_paths(checkpoint)
 
     def test_resume_requires_explicit_pickle_trust(self):
         with self.assertRaisesRegex(ResumeContractError, "trust_resume_state"):

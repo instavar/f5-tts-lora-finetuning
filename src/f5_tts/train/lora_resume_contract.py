@@ -247,3 +247,51 @@ def validate_checkpoint(
     if isinstance(target_epochs, int) and state["data_epoch"] >= target_epochs:
         raise ResumeContractError("LoRA checkpoint already reached the configured training target")
     return resolved, state, sidecar
+
+
+def evaluator_lora_artifact_paths(checkpoint: str | Path) -> dict[str, Path]:
+    """Map one published checkpoint to evaluator 0.45 final-state roles."""
+    unresolved = Path(checkpoint).expanduser()
+    if unresolved.is_symlink():
+        raise ResumeContractError(f"Evaluator checkpoint symlinks are not allowed: {unresolved}")
+    resolved = unresolved.resolve(strict=True)
+    if not resolved.is_dir() or not _CHECKPOINT_RE.fullmatch(resolved.name):
+        raise ResumeContractError("Evaluator checkpoint must be an immutable lora_N directory")
+
+    sidecar_path = resolved / SIDECAR_NAME
+    if sidecar_path.is_symlink() or not sidecar_path.is_file():
+        raise ResumeContractError(f"Checkpoint has no safe {SIDECAR_NAME}: {resolved}")
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    if sidecar.get("schema_version") != SCHEMA_VERSION:
+        raise ResumeContractError("Unsupported resume sidecar schema")
+    files = sidecar.get("files")
+    if not isinstance(files, dict):
+        raise ResumeContractError("Resume sidecar files must be an object")
+
+    names_by_role = {
+        "model_state": "adapter_model.safetensors",
+        "optimizer_state": OPTIMIZER_STATE_NAME,
+        "scheduler_state": SCHEDULER_STATE_NAME,
+        "trainer_state": STATE_NAME,
+        "rng_state": RUNTIME_STATE_NAME,
+    }
+    missing = sorted(role for role, name in names_by_role.items() if name not in files)
+    if missing:
+        raise ResumeContractError("Evaluator checkpoint omits roles: " + ", ".join(missing))
+
+    artifacts: dict[str, Path] = {}
+    identities: set[tuple[int, int]] = set()
+    for role, name in names_by_role.items():
+        member = resolved / name
+        identity = files[name]
+        if member.is_symlink() or not member.is_file() or not isinstance(identity, dict):
+            raise ResumeContractError(f"Evaluator checkpoint member is missing or unsafe: {name}")
+        stat = member.stat()
+        file_token = (stat.st_dev, stat.st_ino)
+        if file_token in identities:
+            raise ResumeContractError("Evaluator artifact roles must not share files or hardlinks")
+        identities.add(file_token)
+        if stat.st_size != identity.get("size") or sha256_file(member) != identity.get("sha256"):
+            raise ResumeContractError(f"Evaluator checkpoint member drift detected: {name}")
+        artifacts[role] = member
+    return artifacts

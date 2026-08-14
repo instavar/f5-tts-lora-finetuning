@@ -24,6 +24,11 @@ The five evaluator 0.45 final-state roles now map as follows:
 additional evidence. The runtime loader continues to read the combined file;
 the decomposed copies are for cross-run evidence and inspection.
 
+`evaluator_lora_artifact_paths(...)` now rehashes each mapped live file against
+the published sidecar and rejects legacy incomplete evidence, terminal
+symlinks, unsafe members, and cross-role hardlinks before returning paths to the
+shared evaluator.
+
 ## OOD and compatibility controls
 
 Dependency-free tests cover:
@@ -34,8 +39,12 @@ Dependency-free tests cover:
   original guarded loader contract; and
 - source-level checks that the trainer writes both decomposed files before the
   atomic directory publication.
+- exact five-role mapping plus rejection of legacy, mutated, and hardlinked
+  evaluator inputs.
 
 The focused guarded-resume suite passed 20 tests locally with Python 3.11.
+After adding the fail-closed mapper, full dependency-free discovery passed 50
+tests locally.
 The public contract workflow pins evaluator 0.45 revision
 `29c38cfd86b889abc8b79df063c817dd8f684903` and verifies that its live
 conditioning receipt and comparison APIs are present.
