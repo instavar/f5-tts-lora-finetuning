@@ -104,15 +104,20 @@ conda install ffmpeg
 > ```
 
 ### Docker usage also available
+
+The Instavar image is built from this repository checkout and its pinned
+BigVGAN submodule. The OCI revision label records the exact companion commit;
+it does not clone an unpinned upstream head during the build.
+
 ```bash
 # Build from Dockerfile
 docker build -t f5tts:v1 .
 
 # Run from GitHub Container Registry
-docker container run --rm -it --gpus=all --mount 'type=volume,source=f5-tts,target=/root/.cache/huggingface/hub/' -p 7860:7860 ghcr.io/swivid/f5-tts:main
+docker container run --rm -it --gpus=all --mount 'type=volume,source=f5-tts,target=/root/.cache/huggingface/hub/' -p 7860:7860 ghcr.io/instavar/f5-tts-lora-finetuning:main
 
 # Quickstart if you want to just run the web interface (not CLI)
-docker container run --rm -it --gpus=all --mount 'type=volume,source=f5-tts,target=/root/.cache/huggingface/hub/' -p 7860:7860 ghcr.io/swivid/f5-tts:main f5-tts_infer-gradio --host 0.0.0.0
+docker container run --rm -it --gpus=all --mount 'type=volume,source=f5-tts,target=/root/.cache/huggingface/hub/' -p 7860:7860 ghcr.io/instavar/f5-tts-lora-finetuning:main f5-tts_infer-gradio --host 0.0.0.0
 ```
 
 ### Runtime
@@ -162,7 +167,7 @@ f5-tts_infer-gradio --share
 ```yaml
 services:
   f5-tts:
-    image: ghcr.io/swivid/f5-tts:main
+    image: ghcr.io/instavar/f5-tts-lora-finetuning:main
     ports:
       - "7860:7860"
     environment:

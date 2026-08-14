@@ -4,7 +4,10 @@ USER root
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-LABEL github_repo="https://github.com/SWivid/F5-TTS"
+ARG SOURCE_REVISION=unknown
+
+LABEL org.opencontainers.image.source="https://github.com/instavar/f5-tts-lora-finetuning"
+LABEL org.opencontainers.image.revision="$SOURCE_REVISION"
 
 RUN set -x \
     && apt-get update \
@@ -14,11 +17,12 @@ RUN set -x \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
     
-WORKDIR /workspace
+WORKDIR /workspace/F5-TTS
 
-RUN git clone https://github.com/SWivid/F5-TTS.git \
-    && cd F5-TTS \
-    && git submodule update --init --recursive \
+COPY . .
+
+RUN test -f src/f5_tts/train/lora_resume_contract.py \
+    && test -f src/third_party/BigVGAN/bigvgan.py \
     && pip install -e . --no-cache-dir
 
 ENV SHELL=/bin/bash
@@ -26,5 +30,3 @@ ENV SHELL=/bin/bash
 VOLUME /root/.cache/huggingface/hub/
 
 EXPOSE 7860
-
-WORKDIR /workspace/F5-TTS
