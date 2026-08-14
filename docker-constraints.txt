@@ -1,5 +1,11 @@
 accelerate==1.11.0
+datasets==4.4.1
+dill==0.4.0
+fsspec==2025.10.0
+multiprocess==0.70.18
+numpy==1.26.4
 peft==0.18.1
+pyarrow==22.0.0
 torch==2.9.0
 torchaudio==2.9.0
 torchcodec==0.8.1

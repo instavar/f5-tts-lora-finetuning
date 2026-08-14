@@ -109,8 +109,9 @@ The Instavar image is built from this repository checkout and its pinned
 BigVGAN submodule. The OCI revision label records the exact companion commit;
 it does not clone an unpinned upstream head during the build. The Linux amd64
 PyTorch 2.9 CUDA 12.8 base is digest-pinned, and `docker-constraints.txt` binds
-the Torch, TorchAudio, TorchCodec, Transformers, PEFT, and Accelerate versions
-to the stack used by the bounded Instavar GPU evidence.
+the training stack and its dataset resolver boundary to the versions used by
+the bounded Instavar GPU evidence. The image build imports the resume contract
+from `/workspace/F5-TTS` and rejects dependency drift before publication.
 
 Registry publication is not the same as anonymous pull availability. On
 2026-08-14, an anonymous manifest request returned `unauthorized`, and the

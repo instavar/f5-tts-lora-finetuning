@@ -24,7 +24,7 @@ COPY . .
 RUN test -f src/f5_tts/train/lora_resume_contract.py \
     && test -f src/third_party/BigVGAN/bigvgan.py \
     && pip install -e . --no-cache-dir --constraint docker-constraints.txt \
-    && python -c "from importlib.metadata import version; from pathlib import Path; import f5_tts.train.lora_resume_contract as contract; expected = {'torch': '2.9.0', 'torchaudio': '2.9.0', 'torchcodec': '0.8.1', 'transformers': '4.57.1', 'peft': '0.18.1', 'accelerate': '1.11.0'}; assert {name: version(name) for name in expected} == expected; assert Path(contract.__file__).resolve().is_relative_to(Path('/workspace/F5-TTS'))"
+    && python scripts/check_container_runtime.py
 
 ENV SHELL=/bin/bash
 
